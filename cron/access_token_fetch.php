@@ -19,17 +19,20 @@ Db::execute("update skq_scopes set lastSsoChecked = 0 where errorCount > 0 and l
 $minutely = date('Hi');
 while ($minutely == date('Hi') && $redis->get("skq:tqStatus") == "ONLINE") {
     $guzzler->finish();
+    while ($redis->llen("skq:esiQueue")) sleep(1);
 
     while ($minutely == date('Hi') && $redis->llen("skq:esiQueue") > 0) usleep(5000);
 
-	$rows = Db::query("select characterID, scope, refresh_token from skq_scopes where lastSsoChecked < date_sub(now(), interval 60 minute) and errorCount < 10 and refresh_token != '' order by lastSsoChecked limit 1", [], 0);
+    $chars = [];
+	$rows = Db::query("select characterID, scope, refresh_token from skq_scopes where lastSsoChecked < date_sub(now(), interval 60 minute) and errorCount < 10 and refresh_token != '' order by lastSsoChecked", [], 0);
     $timerGlobal = new Timer();
 	foreach ($rows as $row) {
         if ($minutely != date('Hi')) break;
 		$charID = $row['characterID'];
-        if ($charID == null){
-            continue;
-        }
+        if ($charID == null) continue;
+
+        if (array_search($charID, $chars) !== false) continue;
+        $chars[] = $charID;
 
         $timerChar = new Timer();
 		if (in_array($charID, $i)) continue;
@@ -51,10 +54,9 @@ while ($minutely == date('Hi') && $redis->get("skq:tqStatus") == "ONLINE") {
             Db::execute("update skq_scopes set errorCount = 0, lastErrorCode = 0 where characterID = :charID and scope = :scope", [':charID' => $r['characterID'], ':scope' => $r['scope']]);
             $redis->rpush("skq:esiQueue", serialize($r));
         }
-        while ($timerChar->stop() <= 500) { $guzzler->tick(); usleep(10000); }
 	}
     while ($timerGlobal->stop() <= 500) { $guzzler->tick(); usleep(10000); }
-    usleep(100000);
+    sleep(1);
 }
 $guzzler->finish();
 if ($count > 0) Util::out("SSO Processed $count => " . number_format($count / 60, 1) . "rps");
