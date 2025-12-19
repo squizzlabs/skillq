@@ -80,6 +80,10 @@ class Info
      */
     public static function getItemName($typeID)
     {
+        $name = Db::queryField("select typeName from skq_items where typeID = :typeID", "typeName", ['typeID' => $typeID]);
+        if ($name != "") return $name;
+        Db::execute("insert ignore into skq_items (typeID) values(:typeID)", ['typeID' => $typeID]);
+
         $name = Db::queryField(
           "select typeName from ccp_invTypes where typeID = :typeID",
           "typeName",
