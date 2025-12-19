@@ -17,7 +17,7 @@ $minutely = date('Hi');
 while ($minutely == date('Hi') && $redis->get("skq:tqStatus") == "ONLINE") {
 	$row = unserialize($redis->lpop("skq:esiQueue"));
 	if ($row == null) {
-        for ($tt = 0; $tt <= 100; $tt++) { $guzzler->tick(); usleep(100000); }
+        for ($tt = 0; $tt <= 100; $tt++) { $guzzler->tick(); usleep(10000); }
 		continue;
 	}
 
@@ -25,27 +25,29 @@ while ($minutely == date('Hi') && $redis->get("skq:tqStatus") == "ONLINE") {
 	$scope = $row['scope'];
 	$refreshToken = $row['refresh_token'];
 	$accessToken = @$row['accessToken'];
-    Util::out("$charID $scope");
+    //Util::out("$charID $scope");
 
-	$headers = ['Authorization' =>"Bearer $accessToken", "Content-Type" => "application/json", 'etag' => $redis];
+	$headers = ['Authorization' =>"Bearer $accessToken", "Content-Type" => "application/json"];
 	$params = ['row' => $row];
 
 	$count++;
 	switch ($scope) {
 		case 'esi-skills.read_skills.v1':
-			$url = "https://esi.evetech.net/v4/characters/$charID/skills/";
+            $headers['X-Compatibility-Date'] = '2099-01-01';
+			$url = "https://esi.evetech.net/characters/$charID/skills";
 			$guzzler->call($url, "loadSkills", "fail", $params, $headers);
 			break;
 		case 'esi-skills.read_skillqueue.v1':
-			$url = "https://esi.evetech.net/v2/characters/$charID/skillqueue/";
+            $headers['X-Compatibility-Date'] = '2099-01-01';
+			$url = "https://esi.evetech.net/characters/$charID/skillqueue";
 			$guzzler->call($url, "loadQueue", "fail", $params, $headers);
 			break;
 		case 'esi-wallet.read_character_wallet':
-			$url = "https://esi.evetech.net/v1/characters/$charID/wallet/";
+			$url = "https://esi.evetech.net/characters/$charID/wallet/";
 			$guzzler->call($url, "loadWallet", "fail", $params, $headers);
 			break;
 		case 'publicData':
-			$url = "https://esi.evetech.net/v5/characters/$charID/";
+			$url = "https://esi.evetech.net/characters/$charID/";
 			$guzzler->call($url, "loadPublicData", "fail", $params, $headers);
 			break;
 		default:
@@ -56,8 +58,9 @@ while ($minutely == date('Hi') && $redis->get("skq:tqStatus") == "ONLINE") {
 $guzzler->finish();
 if ($count > 0) Util::out("Fetch Processed $count => " . number_format($count / 60, 1) . "rps");
 
-function loadSkills(&$guzzler, &$params, &$content)
+function loadSkills(&$guzzler, &$params, &$content, $headers)
 {
+    Util::out("X-Esi-Cache-Status for skills: " . @$headers['X-Esi-Cache-Status'][0]);
 	if ($content != "") {
 		$skills = json_decode($content, true);
 		$charID = $params['row']['characterID'];
@@ -74,8 +77,9 @@ function loadSkills(&$guzzler, &$params, &$content)
 	clearError($params['row']);
 }
 
-function loadQueue(&$guzzler, &$params, &$content) 
+function loadQueue(&$guzzler, &$params, &$content, $headers) 
 {
+    Util::out("X-Esi-Cache-Status for queue: " . @$headers['X-Esi-Cache-Status'][0]);
 	$charID = $params['row']['characterID'];
 	if ($content != "") {
 		$queue = json_decode($content, true);

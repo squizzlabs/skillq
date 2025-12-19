@@ -17,7 +17,8 @@ while ($minute == date("Hi") && $redis->get("skq:tqStatus") == "ONLINE") {
 	foreach ($corps as $corp) {
         if ($minute !== date('Hi')) break;
 		$corpID = $corp['corporationID'];
-		$url = "https://esi.evetech.net/v4/corporations/$corpID/";
+        if ($corpID == 0) continue;
+		$url = "https://esi.evetech.net/corporations/$corpID/";
 		$raw = file_get_contents($url);
 		$json = json_decode($raw, true);
 		if (isset($json['name'])) {
@@ -32,7 +33,8 @@ while ($minute == date("Hi") && $redis->get("skq:tqStatus") == "ONLINE") {
 	foreach ($allis as $alli) {
         if ($minute !== date('Hi')) break;
 		$alliID = $alli['allianceID'];
-		$url = "https://esi.evetech.net/v3/alliances/$alliID/";
+        if ($alliID == 0) continue;
+		$url = "https://esi.evetech.net/alliances/$alliID/";
 		$raw = file_get_contents($url);
 		$json = json_decode($raw, true);
 		if (isset($json['name'])) {

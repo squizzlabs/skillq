@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "6f0244e96c7cc0be908542436ef3ee38",
+    "content-hash": "bc9bf73290d7ada724327b29e5e5bd20",
     "packages": [
         {
             "name": "aptoma/twig-markdown",
@@ -67,46 +67,6 @@
             },
             "abandoned": true,
             "time": "2015-10-23T20:27:08+00:00"
-        },
-        {
-            "name": "cvweiss/guzzler",
-            "version": "v0.0.9",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/cvweiss/guzzler.git",
-                "reference": "c945fa713403ef59dea2348251b130d7b70d93b8"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/cvweiss/guzzler/zipball/c945fa713403ef59dea2348251b130d7b70d93b8",
-                "reference": "c945fa713403ef59dea2348251b130d7b70d93b8",
-                "shasum": ""
-            },
-            "require": {
-                "guzzlehttp/guzzle": "^6.2"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "cvweiss\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Clinton Weiss",
-                    "email": "cvweiss@gmail.com"
-                }
-            ],
-            "description": "A utility that allows multiples sequences of calls with execution of code between each sequence.",
-            "support": {
-                "issues": "https://github.com/cvweiss/guzzler/issues",
-                "source": "https://github.com/cvweiss/guzzler/tree/v0.0.9"
-            },
-            "time": "2018-09-18T13:25:59+00:00"
         },
         {
             "name": "cvweiss/zcache",
@@ -851,7 +811,7 @@
         },
         {
             "name": "symfony/polyfill-ctype",
-            "version": "v1.32.0",
+            "version": "v1.33.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/polyfill-ctype.git",
@@ -910,7 +870,7 @@
                 "portable"
             ],
             "support": {
-                "source": "https://github.com/symfony/polyfill-ctype/tree/v1.32.0"
+                "source": "https://github.com/symfony/polyfill-ctype/tree/v1.33.0"
             },
             "funding": [
                 {
@@ -922,6 +882,10 @@
                     "type": "github"
                 },
                 {
+                    "url": "https://github.com/nicolas-grekas",
+                    "type": "github"
+                },
+                {
                     "url": "https://tidelift.com/funding/github/packagist/symfony/symfony",
                     "type": "tidelift"
                 }
@@ -930,7 +894,7 @@
         },
         {
             "name": "symfony/polyfill-intl-idn",
-            "version": "v1.32.0",
+            "version": "v1.33.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/polyfill-intl-idn.git",
@@ -993,7 +957,7 @@
                 "shim"
             ],
             "support": {
-                "source": "https://github.com/symfony/polyfill-intl-idn/tree/v1.32.0"
+                "source": "https://github.com/symfony/polyfill-intl-idn/tree/v1.33.0"
             },
             "funding": [
                 {
@@ -1005,6 +969,10 @@
                     "type": "github"
                 },
                 {
+                    "url": "https://github.com/nicolas-grekas",
+                    "type": "github"
+                },
+                {
                     "url": "https://tidelift.com/funding/github/packagist/symfony/symfony",
                     "type": "tidelift"
                 }
@@ -1013,7 +981,7 @@
         },
         {
             "name": "symfony/polyfill-intl-normalizer",
-            "version": "v1.32.0",
+            "version": "v1.33.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/polyfill-intl-normalizer.git",
@@ -1074,7 +1042,7 @@
                 "shim"
             ],
             "support": {
-                "source": "https://github.com/symfony/polyfill-intl-normalizer/tree/v1.32.0"
+                "source": "https://github.com/symfony/polyfill-intl-normalizer/tree/v1.33.0"
             },
             "funding": [
                 {
@@ -1083,6 +1051,10 @@
                 },
                 {
                     "url": "https://github.com/fabpot",
+                    "type": "github"
+                },
+                {
+                    "url": "https://github.com/nicolas-grekas",
                     "type": "github"
                 },
                 {

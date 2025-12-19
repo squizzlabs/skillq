@@ -171,6 +171,6 @@ class Util
 
     public static function getGuzzler($concurrent = 20, $usleepTime = 1000)
     {
-	    return new \cvweiss\Guzzler($concurrent, $usleepTime, "skillq.net", [CURLOPT_SSL_VERIFYHOST => false, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_FRESH_CONNECT => false]);
+	    return new Guzzler($concurrent, $usleepTime, "skillq.net", [CURLOPT_SSL_VERIFYHOST => false, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_FRESH_CONNECT => false]);
     }
 }
