@@ -1,12 +1,10 @@
 <?php
 
-pcntl_fork();
-
 require_once "../init.php";
 
 use zkillboard\crestsso\CrestSSO;
 
-$guzzler = Util::getGuzzler(5);
+$guzzler = Util::getGuzzler(4);
 
 global $clientID, $secretKey, $callbackURL, $scopes;
 
@@ -60,7 +58,6 @@ if ($count > 0) Util::out("Fetch Processed $count => " . number_format($count / 
 
 function loadSkills(&$guzzler, &$params, &$content, $headers)
 {
-    Util::out("X-Esi-Cache-Status for skills: " . @$headers['X-Esi-Cache-Status'][0]);
 	if ($content != "") {
 		$skills = json_decode($content, true);
 		$charID = $params['row']['characterID'];
@@ -79,7 +76,6 @@ function loadSkills(&$guzzler, &$params, &$content, $headers)
 
 function loadQueue(&$guzzler, &$params, &$content, $headers) 
 {
-    Util::out("X-Esi-Cache-Status for queue: " . @$headers['X-Esi-Cache-Status'][0]);
 	$charID = $params['row']['characterID'];
 	if ($content != "") {
 		$queue = json_decode($content, true);
