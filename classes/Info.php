@@ -80,8 +80,15 @@ class Info
      */
     public static function getItemName($typeID)
     {
-        $name = Db::queryField("select typeName from skq_items where typeID = :typeID", "typeName", ['typeID' => $typeID]);
+        global $redis;
+        $name = $redis->get("name:$typeID");
         if ($name != "") return $name;
+
+        $name = Db::queryField("select typeName from skq_items where typeID = :typeID", "typeName", ['typeID' => $typeID]);
+        if ($name != "") {
+            $redis->setex("name:$typeID", 3600, $name);
+            return $name;
+        }
         Db::execute("insert ignore into skq_items (typeID) values(:typeID)", ['typeID' => $typeID]);
 
         $name = Db::queryField(
@@ -104,12 +111,19 @@ class Info
      */
     public static function getItemID($itemName)
     {
-        return Db::queryField(
+        global $redis;
+        $typeID = $redis->get("itemName:$itemName");
+        if ($typeID != "") return (int) $typeID;
+
+        $typeID = Db::queryField(
           "select typeID from ccp_invTypes where upper(typeName) = :typeName",
           "typeID",
           array(":typeName" => strtoupper($itemName)),
          3600
         );
+
+        $redis->setex("itemName:$itemName", 3600, $typeID);
+        return $typeID;
     }
 
     /**
@@ -149,12 +163,19 @@ class Info
      */
     public static function getAlliName($id)
     {
-        return Db::queryField(
+        global $redis;
+        $name = $redis->get("alli:$id");
+        if ($name != "") return $name;
+
+        $name = Db::queryField(
           "select allianceName from skq_alliances where allianceID = :id limit 1",
           "allianceName",
           array(":id" => $id),
          3600
         );
+
+        $redis->setex("alli:$id", 3600, $name);
+        return $name;
     }
 
     /**
@@ -251,6 +272,10 @@ class Info
      */
     public static function getCorpName($id)
     {
+        global $redis;
+        $name = $redis->get("corp:$id");
+        if ($name != "") return $name;
+
         $name = Db::queryField(
           "select corporationName from skq_corporations where corporationID = :id",
           "corporationName",
@@ -258,6 +283,7 @@ class Info
          3600
         );
         if ($name != null) {
+            $redis->setex("corp:$id", 3600, $name);
             return $name;
         }
 
@@ -301,17 +327,19 @@ class Info
      */
     public static function getCharName($id)
     {
+        global $redis;
+        $name = $redis->get("charName:$id");
+        if ($name != "") return $name;
+
         $name = Db::queryField(
           "select characterName from skq_character_info where characterID = :id",
           "characterName",
           array(":id" => $id),
          3600
         );
-        if ($name != null) {
-            return $name;
-        }
-
-        return "Character $id";
+        if ($name == "" || $name == null) $name = "Character $id";
+        $redis->setex("charName:$id", 30, $name);
+        return $name;
     }
 
     /**
@@ -320,16 +348,18 @@ class Info
      */
     public static function getGroupID($id)
     {
-        $groupID = Db::queryField(
+        global $redis;
+        $groupID = $redis->get("typeID2groupID:$id");
+        if ($groupID != "") return (int) $groupID;
+
+        $groupID = (int) Db::queryField(
           "select groupID from ccp_invTypes where typeID = :id",
           "groupID",
           array(":id" => $id),
          3600
         );
-        if ($groupID === null) {
-            return 0;
-        }
 
+        $redis->setex("typeID2groupID:$id", 3600, $groupID);
         return $groupID;
     }
 
@@ -339,6 +369,11 @@ class Info
      */
     public static function getGroupIdFromName($id)
     {
+        global $redis;
+        
+        $groupID = $redis->get("groupID:$id");
+        if ($groupID != "") return (int) $groupID;
+
         $groupID = Db::queryField(
           "select groupID from ccp_invGroups where groupName = :id",
           "groupID",
@@ -349,6 +384,7 @@ class Info
             return 0;
         }
 
+        $redis->setex("groupID:$id", 3600, $id);
         return $groupID;
     }
 
@@ -361,6 +397,11 @@ class Info
      */
     public static function getGroupName($groupID)
     {
+        global $redis;
+
+        $name = $redis->get("group:$groupID");
+        if ($name != "") return $name;
+
         $name = Db::queryField(
           "select groupName from ccp_invGroups where groupID = :id",
           "groupName",
@@ -368,6 +409,7 @@ class Info
          3600
         );
 
+        $redis->setex("group:$groupID", 3600, $name);
         return $name;
     }
 
@@ -540,11 +582,17 @@ class Info
      */
     public static function getRefTypeName($id)
     {
-        return Db::queryField(
+        global $redis;
+        $name = $redis->get("refName:$id");
+        if ($name != "") return $name;
+
+        $name = Db::queryField(
           "select refTypeName from ccp_api_refTypes where refTypeID = :id",
           "refTypeName",
           array(":id" => $id)
         );
+        $redis->setex("refName:$id", 3600, $name);
+        return $name;
     }
 
     /**
@@ -599,11 +647,11 @@ class Info
                                     $element["groupName"] = Info::getGroupName($value);
                                 }
                                 if ($loadGroupShips && !isset($element["groupShips"]) && !isset($element["noRecursion"])) {
-                                    $element["groupShips"] = Db::query(
+                                    /*$element["groupShips"] = Db::query(
                                       "select typeID as shipTypeID, typeName as shipName, raceID, 1 as noRecursion from ccp_invTypes where groupID = :id and published = 1 and marketGroupID is not null order by raceID, marketGroupID, typeName",
                                       array(":id" => $value),
                                      3600
-                                    );
+                                    );*/
                                 }
                                 break;
                             case "executorCorpID":
