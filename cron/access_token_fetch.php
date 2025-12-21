@@ -32,14 +32,26 @@ while ($minutely == date('Hi') && $redis->get("skq:tqStatus") == "ONLINE") {
 		$charID = $row['characterID'];
         if ($charID == null) continue;
 
+        // ensure the character's owner has accessed skillq recently
+        $recent = Db::queryField("select count(*) count from skq_users where characterID = :charID and lastAccess >= date_sub(now(), interval 1 week)" , "count", ['charID' => $charID]);
+        if ($recent == 0) {
+            // check association
+            $assocCharID = Db::queryField("select char1 from skq_character_associations where char2 = :charID", "char1", ['charID' => $charID]);
+            $recent = Db::queryField("select count(*) count from skq_users where characterID = :charID and lastAccess >= date_sub(now(), interval 1 week)", "count", ['charID' => $assocCharID]);
+        }
+
         if (array_search($charID, $chars) !== false) continue;
         $chars[] = $charID;
 
         $timerChar = new Timer();
 		if (in_array($charID, $i)) continue;
 		$i[] = $charID;
-        //Util::out("Prepping $charID");
 		Db::execute("update skq_scopes set lastSsoChecked = now() where characterID = :charID", [':charID' => $charID]);
+        if ($recent == 0) {
+            Util::out("Skipping $charID");
+            continue;
+        }
+        Util::out("Prepping $charID");
 		$refreshToken = $row['refresh_token'];
 
         try {
@@ -55,7 +67,7 @@ while ($minutely == date('Hi') && $redis->get("skq:tqStatus") == "ONLINE") {
             Db::execute("update skq_scopes set errorCount = 0, lastErrorCode = 0 where characterID = :charID and scope = :scope", [':charID' => $r['characterID'], ':scope' => $r['scope']]);
             $redis->rpush("skq:esiQueue", serialize($r));
         }
-        //for ($j = 0; $j < 5; $j++) { usleep(50000); $guzzler->tick(); }
+        for ($j = 0; $j < 5; $j++) { usleep(250000); $guzzler->tick(); }
 	}
 }
 $guzzler->finish();
