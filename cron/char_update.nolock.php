@@ -31,12 +31,12 @@ while ($minutely == date('Hi') && $redis->get("skq:tqStatus") == "ONLINE") {
 	$count++;
 	switch ($scope) {
 		case 'esi-skills.read_skills.v1':
-            $headers['X-Compatibility-Date'] = '2099-01-01';
+            $headers['X-Compatibility-Date'] = '2020-01-01';
 			$url = "https://esi.evetech.net/characters/$charID/skills";
 			$guzzler->call($url, "loadSkills", "fail", $params, $headers);
 			break;
 		case 'esi-skills.read_skillqueue.v1':
-            $headers['X-Compatibility-Date'] = '2099-01-01';
+            $headers['X-Compatibility-Date'] = '2020-01-01';
 			$url = "https://esi.evetech.net/characters/$charID/skillqueue";
 			$guzzler->call($url, "loadQueue", "fail", $params, $headers);
 			break;
