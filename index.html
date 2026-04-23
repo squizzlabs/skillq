@@ -6,13 +6,24 @@
   <title>SkillQ</title>
   <link rel="stylesheet" href="/css/skillq.css" />
 
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const route = params.get('route');
+      if (route) {
+        const routeQuery = params.get('routeQuery') || '';
+        const restored = route + routeQuery + window.location.hash;
+        history.replaceState(null, '', restored);
+      }
+    })();
+  </script>
+
   <script defer src="https://cdn.jsdelivr.net/npm/dexie@4/dist/dexie.min.js"></script>
-  <script defer type="module" src="./js/KeyValues.js"></script>
-  <script defer src="./js/DexieStore.js"></script>
-  <script defer src="./js/SimpleESI.js"></script>
-  <script defer src="./js/esi.js"></script>
-  <script defer src="./js/tools.js"></script>
-  <script defer src="./js/app.js"></script>
+  <script defer src="/js/DexieStore.js"></script>
+  <script defer src="/js/SimpleESI.js"></script>
+  <script defer src="/js/esi.js"></script>
+  <script defer src="/js/tools.js"></script>
+  <script defer src="/js/app.js"></script>
 </head>
 <body>
   <main>

@@ -77,8 +77,8 @@ class SimpleESI {
 
 		this.inflight = 0;
 
-		// Replace localStorage with async KeyValues store
-		this.store = new KeyValues('simpleesi-db', 'simpleesi-store', 5 * 60 * 1000);
+		// Persistent store backed by Dexie (IndexedDB)
+		this.store = new DexieStore('simpleesi-db', 'simpleesi-store', 5 * 60 * 1000);
 
 		// user info and cache
 		this.whoami = null;
@@ -121,6 +121,7 @@ class SimpleESI {
 	}
 
 	async domLoaded() {
+		console.log('domLoaded', window.location.pathname);
 		switch (window.location.pathname) {
 			case this.getOption('loginURL', '/login.html'):
 				return this.authBegin();
