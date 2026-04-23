@@ -33,21 +33,25 @@ class SpaFallbackHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         request_path = unquote(parsed.path)
 
-        # Serve canonical root for directory-like routes.
-        if request_path.endswith("/"):
-            return super().send_head()
-
         # Serve real files when present.
         fs_path = Path(self.directory) / request_path.lstrip("/")
         if fs_path.is_file():
             return super().send_head()
 
+        # Serve real directories only when they contain an index.html.
+        if fs_path.is_dir():
+            if (fs_path / "index.html").is_file():
+                return super().send_head()
+            return self.serve_404_page()
+
         # For extensionless app routes, return the custom 404 page.
-        if "." not in Path(request_path).name:
+        route_name = Path(request_path.rstrip("/")).name
+        if "." not in route_name:
             return self.serve_404_page()
 
         # Keep normal 404 behavior for unknown asset paths.
-        return self.serve_404_page()
+        self.send_error(404)
+        return None
 
 
 def parse_args() -> argparse.Namespace:

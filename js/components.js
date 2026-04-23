@@ -58,18 +58,27 @@ function _skillPips(level, training = 0, queued = 0) {
  *
  * characters: [{ character_id, name }]
  */
-function renderNavbar({ characters = [], currentCharId = null, isLoggedIn = false } = {}) {
+function renderNavbar({ characters = [], currentCharId = null, isLoggedIn = false, layoutMode = 'restricted', isHome = false } = {}) {
 	const nav = _el('nav', 'sq-nav');
 
 	// Brand
-	nav.appendChild(_a('/', 'SkillQ', 'sq-nav__brand'));
+	const brand = _a('/', null, 'sq-nav__brand');
+	brand.appendChild(_img('/img/skillbook.png', 'Skillbook', 'sq-nav__brand-icon'));
+	brand.appendChild(_el('span', 'sq-nav__brand-text', 'SkillQ'));
+	nav.appendChild(brand);
+
+	if (isLoggedIn) {
+		const allLink = _a('/', 'All', 'sq-nav__all-link');
+		if (isHome) allLink.classList.add('sq-nav__all-link--active');
+		nav.appendChild(allLink);
+	}
 
 	// Character portrait strip
 	if (characters.length > 0) {
 		const strip = _el('div', 'sq-nav__chars');
 		for (const char of characters) {
 			const a = _a(`/char/${encodeURIComponent(char.name)}`, null, 'sq-nav__char-link');
-			if (char.character_id == currentCharId) a.classList.add('sq-nav__char-link--active');
+			if (!isHome && char.character_id == currentCharId) a.classList.add('sq-nav__char-link--active');
 			a.dataset.characterId = String(char.character_id);
 			a.title = char.name;
 			a.appendChild(_img(
@@ -87,13 +96,23 @@ function renderNavbar({ characters = [], currentCharId = null, isLoggedIn = fals
 	if (isLoggedIn) {
 		actions.appendChild(_a('/login', 'Add Character', 'sq-nav__add-link'));
 
-		// Dropdown menu (Manage / Account / Logout)
+		// Dropdown menu (Manage / Settings / Logout)
 		const dropdown = _el('div', 'sq-dropdown');
 		const toggle = _el('button', 'sq-dropdown__toggle sq-btn sq-btn--ghost');
 		toggle.innerHTML = '&#9776;';
 		toggle.setAttribute('aria-expanded', 'false');
 		const menu = _el('ul', 'sq-dropdown__menu');
-		for (const [label, href] of [['Manage', '/manage'], ['Account', '/account'], ['Logout', '/logout']]) {
+		const mobileAddItem = document.createElement('li');
+		mobileAddItem.appendChild(_a('/login', 'Add Character', 'sq-dropdown__item sq-dropdown__item--mobile-only'));
+		menu.appendChild(mobileAddItem);
+
+		const layoutItem = document.createElement('li');
+		const layoutToggle = _a('#', layoutMode === 'full' ? 'Use Restricted Width' : 'Use Full Width', 'sq-dropdown__item');
+		layoutToggle.classList.add('sq-layout-toggle');
+		layoutItem.appendChild(layoutToggle);
+		menu.appendChild(layoutItem);
+
+		for (const [label, href] of [['Manage', '/manage'], ['Settings', '/settings'], ['Logout', '/logout']]) {
 			const li = document.createElement('li');
 			li.appendChild(_a(href, label, 'sq-dropdown__item'));
 			menu.appendChild(li);
@@ -154,7 +173,7 @@ function renderCharCard({ character, training = null } = {}) {
 
 	if (training?.typeName) {
 		const trainDiv = _el('div', 'sq-char-card__training');
-		trainDiv.textContent = `▶ ${training.typeName}`;
+		trainDiv.textContent = `${training.typeName}`;
 		info.appendChild(trainDiv);
 
 		if (training.trainingEndMs > Date.now()) {
@@ -190,7 +209,7 @@ function renderCharInfo({ character, corporation = null, alliance = null, traini
 
 	// Portrait
 	el.appendChild(_img(
-		`https://images.evetech.net/characters/${character_id}/portrait?size=128`,
+		`https://images.evetech.net/characters/${character_id}/portrait?size=256`,
 		name,
 		'sq-char-info__portrait'
 	));
@@ -199,14 +218,14 @@ function renderCharInfo({ character, corporation = null, alliance = null, traini
 	const logos = _el('div', 'sq-char-info__logos');
 	if (corporation_id) {
 		logos.appendChild(_img(
-			`https://images.evetech.net/corporations/${corporation_id}/logo?size=64`,
+			`https://images.evetech.net/corporations/${corporation_id}/logo?size=128`,
 			corporation?.name || '',
 			'sq-char-info__logo'
 		));
 	}
 	if (alliance_id) {
 		logos.appendChild(_img(
-			`https://images.evetech.net/alliances/${alliance_id}/logo?size=64`,
+			`https://images.evetech.net/alliances/${alliance_id}/logo?size=128`,
 			alliance?.name || '',
 			'sq-char-info__logo'
 		));
@@ -221,7 +240,7 @@ function renderCharInfo({ character, corporation = null, alliance = null, traini
 	if (showBalance)       details.appendChild(_el('div', 'sq-char-info__balance', `${numberFormat(balance, 2)} ISK`));
 
 	if (training?.typeName) {
-		details.appendChild(_el('div', 'sq-char-info__training', `▶ ${training.typeName}`));
+		details.appendChild(_el('div', 'sq-char-info__training', `${training.typeName}`));
 		if (training.trainingEndMs > Date.now()) {
 			const countdown = _el('span', 'sq-countdown');
 			countdown.dataset.until = training.trainingEndMs;
@@ -292,13 +311,35 @@ function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP 
 		const tbody = document.createElement('tbody');
 		for (const skill of queue) {
 			const tr = document.createElement('tr');
-			tr.innerHTML = `
-				<td><a href="/item/${skill.typeID}/">${skill.typeName}</a></td>
-				<td>${skill.groupName || ''}</td>
-				<td>${skill.startTime || ''}</td>
-				<td>${skill.endTime || ''}</td>
-				<td>${numberFormat(skill.spHour, 0)}</td>
-			`;
+
+			const skillTd = document.createElement('td');
+			skillTd.dataset.label = 'Skill';
+			const skillLink = document.createElement('a');
+			skillLink.href = `/item/${skill.typeID}/`;
+			skillLink.textContent = skill.typeName;
+			skillTd.appendChild(skillLink);
+			tr.appendChild(skillTd);
+
+			const groupTd = document.createElement('td');
+			groupTd.dataset.label = 'Group';
+			groupTd.textContent = skill.groupName || '';
+			tr.appendChild(groupTd);
+
+			const startTd = document.createElement('td');
+			startTd.dataset.label = 'Start';
+			startTd.textContent = skill.startTime || '';
+			tr.appendChild(startTd);
+
+			const endTd = document.createElement('td');
+			endTd.dataset.label = 'End';
+			endTd.textContent = skill.endTime || '';
+			tr.appendChild(endTd);
+
+			const spTd = document.createElement('td');
+			spTd.dataset.label = 'SP/h';
+			spTd.textContent = numberFormat(skill.spHour, 0);
+			tr.appendChild(spTd);
+
 			tbody.appendChild(tr);
 		}
 		table.appendChild(thead);
@@ -418,15 +459,44 @@ function renderCharWallet({ transactions = [] } = {}) {
 	for (const row of transactions) {
 		const tr = document.createElement('tr');
 		tr.className = row.amount >= 0 ? 'sq-row--positive' : 'sq-row--negative';
-		tr.innerHTML = `
-			<td>${row.dttm || ''}</td>
-			<td>${row.refTypeName || ''}</td>
-			<td>${row.ownerName1 || ''}</td>
-			<td>${row.ownerName2 || ''}</td>
-			<td class="sq-text-right">${numberFormat(row.amount, 2)}</td>
-			<td class="sq-text-right">${numberFormat(row.balance, 2)}</td>
-			<td>${row.reason || ''}</td>
-		`;
+
+		const timeTd = document.createElement('td');
+		timeTd.dataset.label = 'Time';
+		timeTd.textContent = row.dttm || '';
+		tr.appendChild(timeTd);
+
+		const typeTd = document.createElement('td');
+		typeTd.dataset.label = 'Type';
+		typeTd.textContent = row.refTypeName || '';
+		tr.appendChild(typeTd);
+
+		const fromTd = document.createElement('td');
+		fromTd.dataset.label = 'From';
+		fromTd.textContent = row.ownerName1 || '';
+		tr.appendChild(fromTd);
+
+		const toTd = document.createElement('td');
+		toTd.dataset.label = 'To';
+		toTd.textContent = row.ownerName2 || '';
+		tr.appendChild(toTd);
+
+		const amountTd = document.createElement('td');
+		amountTd.dataset.label = 'Amount';
+		amountTd.className = 'sq-text-right';
+		amountTd.textContent = numberFormat(row.amount, 2);
+		tr.appendChild(amountTd);
+
+		const balanceTd = document.createElement('td');
+		balanceTd.dataset.label = 'Balance';
+		balanceTd.className = 'sq-text-right';
+		balanceTd.textContent = numberFormat(row.balance, 2);
+		tr.appendChild(balanceTd);
+
+		const reasonTd = document.createElement('td');
+		reasonTd.dataset.label = 'Reason';
+		reasonTd.textContent = row.reason || '';
+		tr.appendChild(reasonTd);
+
 		tbody.appendChild(tr);
 	}
 

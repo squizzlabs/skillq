@@ -282,6 +282,48 @@ class SimpleESI {
 		return characters;
 	}
 
+	async removeCharacter(characterId) {
+		await this.ready;
+		const targetId = String(characterId);
+
+		await this.store.delete(`simpleesi-global-whoami-${targetId}`);
+		await this.store.table.where('key').startsWith(`simpleesi-${targetId}-`).delete();
+
+		const isCurrent = this.whoami && String(this.whoami.character_id) === targetId;
+		if (!isCurrent) {
+			return;
+		}
+
+		const remainingRows = await this.store.table.where('key').startsWith('simpleesi-global-whoami-').toArray();
+		if (remainingRows.length === 0) {
+			this.whoami = null;
+			await this.store.delete('simpleesi-global-whoami');
+			await this.store.set('simpleesi-global-loggedout', 'true');
+			return;
+		}
+
+		let nextWhoami = null;
+		for (const row of remainingRows) {
+			try {
+				nextWhoami = JSON.parse(row.value);
+				if (nextWhoami?.character_id) break;
+			} catch (_) {
+				// Ignore malformed rows and keep scanning.
+			}
+		}
+
+		if (!nextWhoami?.character_id) {
+			this.whoami = null;
+			await this.store.delete('simpleesi-global-whoami');
+			await this.store.set('simpleesi-global-loggedout', 'true');
+			return;
+		}
+
+		this.whoami = nextWhoami;
+		await this.store.set('simpleesi-global-whoami', JSON.stringify(nextWhoami));
+		await this.store.delete('simpleesi-global-loggedout');
+	}
+
 	async doJsonAuthRequest(url, method = 'GET', headers = null, body = null, character_id = this.whoami?.character_id) {
 		let res = await this.doAuthRequest(url, method, headers, body, character_id);
 		if (!res || !res.ok) {
