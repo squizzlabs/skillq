@@ -22,6 +22,7 @@ const LAYOUT_MODE_KEY = '__ui:layout-mode';
 const THEME_MODE_KEY = '__ui:theme-mode';
 const MANAGE_SETTINGS_KEY = '__ui:manage-settings';
 const SKILL_ENABLES_INDEX_KEY = '__ui:skill-enables-index';
+const SHARE_URL_VERSION = 1;
 let layoutMode = 'restricted';
 let themeMode = 'dark';
 
@@ -63,7 +64,7 @@ async function main() {
 }
 
 function isSpaPath(pathname) {
-	return pathname === '/' || pathname === '/readme' || pathname === '/readme/' || pathname === '/auth' || pathname === '/login' || pathname === '/login-check' || pathname === '/logout' || pathname === '/manage' || pathname === '/manage/' || pathname === '/settings' || pathname === '/settings/' || pathname === '/account' || pathname === '/account/' || pathname.startsWith('/char/') || pathname.startsWith('/item/');
+	return pathname === '/' || pathname === '/readme' || pathname === '/readme/' || pathname === '/share' || pathname === '/share/' || pathname.startsWith('/share/') || pathname === '/auth' || pathname === '/login' || pathname === '/login-check' || pathname === '/logout' || pathname === '/manage' || pathname === '/manage/' || pathname === '/settings' || pathname === '/settings/' || pathname === '/account' || pathname === '/account/' || pathname.startsWith('/char/') || pathname.startsWith('/item/');
 }
 
 function initSpaNavigation() {
@@ -127,6 +128,11 @@ async function handleRoute() {
 		history.replaceState(null, '', '/');
 	}
 
+	if (route.name === 'share') {
+		await renderSharedCharacterPage();
+		return;
+	}
+
 	if (window.esi.whoami === null) {
 		if (path !== '/readme' && path !== '/readme/') {
 			history.replaceState(null, '', '/readme');
@@ -170,6 +176,9 @@ function parseRoute(pathname) {
 	const cleaned = pathname.replace(/\/+$/, '') || '/';
 	if (cleaned === '/readme') {
 		return { name: 'readme' };
+	}
+	if (cleaned === '/share' || cleaned.startsWith('/share/')) {
+		return { name: 'share' };
 	}
 	if (cleaned === '/manage') {
 		return { name: 'manage' };
@@ -283,6 +292,417 @@ function showItemLoading(itemId) {
 	document.getElementById('skillq').classList.remove('d-none');
 }
 
+function renderCharacterShareControls({ character, skills = [], totalSP = 0, lastUpdatedAt = null } = {}) {
+	const button = document.createElement('button');
+	button.type = 'button';
+	button.className = 'sq-char-info__action';
+	button.setAttribute('aria-label', 'Copy share link');
+	button.title = !Array.isArray(skills) || skills.length === 0
+		? 'Share becomes available once overview skills are loaded.'
+		: `Copy shared overview link${lastUpdatedAt ? ` from ${formatDateTime(lastUpdatedAt)}` : ''}`;
+	button.disabled = !Array.isArray(skills) || skills.length === 0;
+	button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 5a3 3 0 1 1 2.83 4H17l-6.2 3.35a3.02 3.02 0 0 1 0 1.3L17 17h.83A3 3 0 1 1 15 19a3 3 0 0 1 .2-1.08l-6.2-3.35a3 3 0 1 1 0-5.14l6.2-3.35A3 3 0 0 1 15 5Zm-8 6a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm10-4a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm0 12a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z" fill="currentColor"/></svg>';
+
+	button.addEventListener('click', async () => {
+		if (button.disabled) return;
+		button.disabled = true;
+		const previousTitle = button.title;
+		button.title = 'Building share link...';
+		try {
+			const url = await buildCharacterShareUrl(character, skills, totalSP);
+			if (navigator.clipboard?.writeText) {
+				await navigator.clipboard.writeText(url);
+				button.title = 'Share link copied';
+			} else {
+				window.prompt('Copy share URL', url);
+				button.title = 'Share link ready to copy';
+			}
+		} catch (err) {
+			button.title = err?.message || 'Unable to build share link.';
+		} finally {
+			button.disabled = !Array.isArray(skills) || skills.length === 0;
+			if (!button.disabled && button.title === 'Share link copied') {
+				setTimeout(() => {
+					button.title = previousTitle;
+				}, 1800);
+			} else if (!button.disabled && button.title === 'Share link ready to copy') {
+				setTimeout(() => {
+					button.title = previousTitle;
+				}, 1800);
+			} else if (!button.disabled && button.title !== 'Building share link...') {
+				setTimeout(() => {
+					button.title = previousTitle;
+				}, 2600);
+			}
+		}
+	});
+
+	return button;
+}
+
+function buildShareSkillRecords(skills, queueWindowsBySkillId = null) {
+	return (skills || [])
+		.map((skill) => {
+			const record = {
+				type_id: Number(skill.typeID || 0),
+				level: Math.max(0, Math.min(5, Number(skill.level || 0)))
+			};
+			const queueWindow = queueWindowsBySkillId?.get(Number(skill.typeID || 0)) || null;
+			const trainingStartMs = Number(queueWindow?.startMs || 0);
+			const trainingEndMs = Number(queueWindow?.endMs || 0);
+			if (trainingStartMs > 0) {
+				record.training_start = Math.floor(trainingStartMs / 1000);
+			}
+			if (trainingEndMs > 0) {
+				record.training_end = Math.floor(trainingEndMs / 1000);
+			}
+			return record;
+		})
+		.filter((record) => record.type_id > 0);
+}
+
+async function buildCharacterShareUrl(character, skills, totalSP = 0) {
+	if (typeof SkillUrlCodecSafe === 'undefined') {
+		throw new Error('Share codec is not available.');
+	}
+	const characterId = String(character?.character_id || '');
+	if (!characterId) {
+		throw new Error('Character information is missing.');
+	}
+	const queueResponse = await window.esi
+		.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue/?datasource=tranquility`, 'GET', null, null, characterId)
+		.catch(() => []);
+	const queue = Array.isArray(queueResponse) ? queueResponse : [];
+	const queueWindowsBySkillId = new Map();
+	for (const row of queue) {
+		const skillId = Number(row?.skill_id || 0);
+		if (!skillId) continue;
+		const startMs = row?.start_date ? Date.parse(row.start_date) : 0;
+		const endMs = row?.finish_date ? Date.parse(row.finish_date) : 0;
+		const existing = queueWindowsBySkillId.get(skillId) || { startMs: 0, endMs: 0 };
+		existing.startMs = existing.startMs > 0 && startMs > 0
+			? Math.min(existing.startMs, startMs)
+			: Math.max(existing.startMs, startMs);
+		existing.endMs = Math.max(existing.endMs, endMs);
+		queueWindowsBySkillId.set(skillId, existing);
+	}
+
+	const records = buildShareSkillRecords(skills, queueWindowsBySkillId);
+	if (records.length === 0) {
+		throw new Error('No overview skills are available to share yet.');
+	}
+	const encodedSkills = SkillUrlCodecSafe.encode(records);
+	const shareContext = await getCharacterShareContext(characterId);
+	const encodedTotalSP = encodeCompactInt(totalSP);
+	const balanceCents = Math.max(0, Math.round(Number(character?.balance || 0) * 100));
+	const encodedBalance = encodeCompactInt(balanceCents);
+	const signature = await createCharacterShareSignature(shareContext, encodedSkills, encodedTotalSP, encodedBalance);
+	return `${window.location.origin}/share/${encodeURIComponent(characterId)}/${encodedSkills}.${signature}.${encodedTotalSP}.${encodedBalance}`;
+}
+
+async function renderCurrentNavbarForUtilityPage() {
+	const navbarRoot = document.getElementById('navbar-root');
+	if (window.esi?.whoami) {
+		const characters = await window.esi.getLoggedInCharacters();
+		const orderedCharacters = await getOrderedCharactersForNavbar(characters);
+		renderNavbarInto(navbarRoot, {
+			characters: orderedCharacters,
+			isLoggedIn: true,
+			layoutMode
+		});
+	} else {
+		renderNavbarInto(navbarRoot, { isLoggedIn: false, layoutMode });
+	}
+	bindLayoutToggle();
+}
+
+function findCurrentCorporationHistoryEntry(historyRows, corporationId) {
+	return (historyRows || [])
+		.filter((row) => Number(row?.corporation_id || 0) === Number(corporationId || 0))
+		.sort((left, right) => {
+			const leftTime = Date.parse(left?.start_date || left?.record_start_date || 0) || 0;
+			const rightTime = Date.parse(right?.start_date || right?.record_start_date || 0) || 0;
+			if (rightTime !== leftTime) return rightTime - leftTime;
+			return Number(right?.record_id || 0) - Number(left?.record_id || 0);
+		})[0] || null;
+}
+
+async function getCharacterShareContext(characterId) {
+	const [charInfo, history] = await Promise.all([
+		window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}/?datasource=tranquility`),
+		window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}/corporationhistory/?datasource=tranquility`)
+	]);
+
+	const corporationId = Number(charInfo?.corporation_id || 0);
+	const currentCorpHistory = findCurrentCorporationHistoryEntry(history, corporationId);
+	const corporationJoinDate = currentCorpHistory?.start_date || currentCorpHistory?.record_start_date || '';
+	if (!corporationId || !corporationJoinDate) {
+		throw new Error('Current corporation signature data is unavailable for this character.');
+	}
+
+	const [corporation, alliance] = await Promise.all([
+		corporationId ? getCorporationInfo(corporationId) : null,
+		charInfo?.alliance_id ? getAllianceInfo(charInfo.alliance_id) : null
+	]);
+
+	return {
+		character: {
+			character_id: String(characterId),
+			name: charInfo?.name || `Character ${characterId}`,
+			corporation_id: corporationId,
+			alliance_id: Number(charInfo?.alliance_id || 0) || null,
+			balance: 0
+		},
+		corporation: corporation ? { corporation_id: corporationId, name: corporation.name } : null,
+		alliance: alliance ? { alliance_id: Number(charInfo?.alliance_id || 0), name: alliance.name } : null,
+		corporationJoinDate
+	};
+}
+
+async function createCharacterShareSignature(shareContext, encodedSkills, encodedTotalSP = '', encodedBalance = '') {
+	const signatureText = [
+		`skillq-share-v${SHARE_URL_VERSION}`,
+		String(shareContext.character.character_id || ''),
+		String(shareContext.character.corporation_id || ''),
+		String(shareContext.corporationJoinDate || ''),
+		String(encodedSkills || ''),
+		String(encodedTotalSP || ''),
+		String(encodedBalance || '')
+	].join('|');
+	return (await sha256Base64Url(signatureText)).slice(0, 16);
+}
+
+function encodeCompactInt(value) {
+	const num = Math.max(0, Math.floor(Number(value || 0)));
+	return num.toString(36);
+}
+
+function decodeCompactInt(value) {
+	if (!value) return 0;
+	const num = Number.parseInt(String(value), 36);
+	return Number.isFinite(num) && num > 0 ? num : 0;
+}
+
+async function sha256Base64Url(text) {
+	const bytes = new TextEncoder().encode(String(text || ''));
+	const digest = await crypto.subtle.digest('SHA-256', bytes);
+	return bytesToBase64Url(new Uint8Array(digest));
+}
+
+function bytesToBase64Url(bytes) {
+	let base64;
+	if (typeof Buffer !== 'undefined') {
+		base64 = Buffer.from(bytes).toString('base64');
+	} else {
+		let binary = '';
+		for (let index = 0; index < bytes.length; index += 1) {
+			binary += String.fromCharCode(bytes[index]);
+		}
+		base64 = btoa(binary);
+	}
+	return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function hydrateSharedSkills(records) {
+	const typeInfos = new Map(await Promise.all(records.map(async (record) => [record.type_id, await getTypeInfo(record.type_id)])));
+	const groupIds = Array.from(new Set(Array.from(typeInfos.values()).map((info) => info?.group_id).filter(Boolean)));
+	const groupInfos = new Map(await Promise.all(groupIds.map(async (groupId) => [groupId, await getGroupInfo(groupId)])));
+
+	return records
+		.map((record) => {
+			const typeInfo = typeInfos.get(record.type_id);
+			const groupInfo = groupInfos.get(typeInfo?.group_id);
+			const trainingEndMs = Number(record.training_end || 0) > 0 ? Number(record.training_end) * 1000 : 0;
+			const trainingLevel = trainingEndMs > 0 ? Math.min(5, Number(record.level || 0) + 1) : 0;
+			return {
+				typeID: Number(record.type_id || 0),
+				typeName: typeInfo?.name || `Skill ${record.type_id}`,
+				groupID: Number(typeInfo?.group_id || 0),
+				groupName: groupInfo?.name || 'Unknown Group',
+				level: Number(record.level || 0),
+				training: trainingLevel,
+				queue: trainingLevel,
+				trainingStartMs: Number(record.training_start || 0) > 0 ? Number(record.training_start) * 1000 : 0,
+				trainingEndMs
+			};
+		})
+		.sort((left, right) => (left.groupName || '').localeCompare(right.groupName || '') || (left.typeName || '').localeCompare(right.typeName || ''));
+}
+
+function findSharedTrainingSummary(skills) {
+	return (skills || [])
+		.filter((skill) => Number(skill.trainingEndMs || 0) > Date.now())
+		.sort((left, right) => Number(left.trainingEndMs || 0) - Number(right.trainingEndMs || 0))[0] || null;
+}
+
+function showSharedCharacterLoading(characterId) {
+	const cardsRoot = document.getElementById('char-cards-root');
+	cardsRoot.replaceChildren();
+	cardsRoot.classList.add('d-none');
+	document.getElementById('net-summary').classList.add('d-none');
+
+	const charViewRoot = document.getElementById('char-view-root');
+	const page = document.createElement('div');
+	page.className = 'sq-char-view';
+
+	const loading = document.createElement('div');
+	loading.className = 'sq-loading';
+	loading.setAttribute('role', 'status');
+	loading.setAttribute('aria-live', 'polite');
+
+	const spinner = document.createElement('span');
+	spinner.className = 'sq-loading__spinner';
+	spinner.setAttribute('aria-hidden', 'true');
+	loading.appendChild(spinner);
+
+	const textWrap = document.createElement('div');
+	const title = document.createElement('p');
+	title.className = 'sq-loading__title';
+	title.textContent = `Loading shared character ${characterId}...`;
+	textWrap.appendChild(title);
+
+	const detail = document.createElement('p');
+	detail.className = 'sq-loading__detail';
+	detail.textContent = 'Verifying the share signature and restoring the overview snapshot.';
+	textWrap.appendChild(detail);
+
+	loading.appendChild(textWrap);
+	page.appendChild(loading);
+	charViewRoot.replaceChildren(page);
+	document.getElementById('about').classList.add('d-none');
+	document.getElementById('skillq').classList.remove('d-none');
+}
+
+async function renderSharedCharacterPage() {
+	const shareData = parseSharedCharacterRoute();
+	const version = shareData.version;
+	const characterId = shareData.characterId;
+	const encodedSkills = shareData.encodedSkills;
+	const providedSignature = shareData.signature;
+	const encodedTotalSP = shareData.encodedTotalSP;
+	const encodedBalance = shareData.encodedBalance;
+	const sharedTotalSP = decodeCompactInt(encodedTotalSP);
+	const hasSharedBalance = encodedBalance !== '';
+	const sharedBalance = decodeCompactInt(encodedBalance) / 100;
+
+	await renderCurrentNavbarForUtilityPage();
+	showSharedCharacterLoading(characterId || '');
+
+	const charViewRoot = document.getElementById('char-view-root');
+	const page = document.createElement('div');
+	page.className = 'sq-char-view';
+
+	try {
+		if (version !== SHARE_URL_VERSION) {
+			throw new Error('This shared link uses an unsupported format version.');
+		}
+		if (!characterId || !encodedSkills || !providedSignature) {
+			throw new Error('This shared link is missing required data.');
+		}
+		if (typeof SkillUrlCodecSafe === 'undefined') {
+			throw new Error('Share codec is not available.');
+		}
+
+		const shareContext = await getCharacterShareContext(characterId);
+		const expectedSignature = await createCharacterShareSignature(shareContext, encodedSkills, encodedTotalSP, encodedBalance);
+		if (expectedSignature !== providedSignature) {
+			throw new Error('This shared link no longer matches the character\'s current corporation signature.');
+		}
+
+		const decodedRecords = SkillUrlCodecSafe.decode(encodedSkills);
+		const sharedSkills = await hydrateSharedSkills(decodedRecords);
+		const trainingSummary = findSharedTrainingSummary(sharedSkills);
+		const sharedCharacter = {
+			...shareContext.character,
+			balance: hasSharedBalance ? sharedBalance : 0
+		};
+
+		page.appendChild(renderCharInfo({
+			character: sharedCharacter,
+			corporation: shareContext.corporation,
+			alliance: shareContext.alliance,
+			training: trainingSummary ? {
+				typeName: trainingSummary.typeName,
+				trainingEndMs: trainingSummary.trainingEndMs,
+				queueEmptyMs: trainingSummary.trainingEndMs
+			} : null,
+			showBalance: hasSharedBalance
+		}));
+
+		const notice = document.createElement('div');
+		notice.className = 'sq-alert';
+		notice.textContent = `Shared overview snapshot ready. Wallet and implants are not included, and this link will automatically invalidate if the character changes corporations (currently ${shareContext.corporation?.name || 'Unknown Corporation'} since ${formatDateTime(shareContext.corporationJoinDate)}).`;
+		page.appendChild(notice);
+
+		page.appendChild(renderSharedCharSkills({ skills: sharedSkills, totalSP: sharedTotalSP }));
+	} catch (err) {
+		const alert = document.createElement('div');
+		alert.className = 'sq-alert';
+		alert.textContent = err?.message || 'This shared character could not be loaded.';
+		page.appendChild(alert);
+	}
+
+	charViewRoot.replaceChildren(page);
+	document.getElementById('about').classList.add('d-none');
+	document.getElementById('skillq').classList.remove('d-none');
+	startCountdowns();
+}
+
+function parseSharedCharacterRoute() {
+	const pathname = window.location.pathname.replace(/\/+$/, '') || '/share';
+	const parts = pathname.split('/').filter(Boolean);
+	if (parts[0] === 'share' && parts.length >= 3) {
+		const joined = parts.slice(2).join('/');
+		const segments = joined.split('.');
+		if (segments.length >= 4) {
+			const encodedBalance = segments.pop();
+			const encodedTotalSP = segments.pop();
+			const signature = segments.pop();
+			const encodedSkills = segments.join('.');
+			return {
+				version: SHARE_URL_VERSION,
+				characterId: decodeURIComponent(parts[1] || ''),
+				encodedSkills,
+				signature,
+				encodedTotalSP,
+				encodedBalance: encodedBalance || ''
+			};
+		}
+		const lastDot = joined.lastIndexOf('.');
+		const secondLastDot = lastDot > 0 ? joined.lastIndexOf('.', lastDot - 1) : -1;
+		if (secondLastDot > 0 && lastDot > secondLastDot) {
+			return {
+				version: SHARE_URL_VERSION,
+				characterId: decodeURIComponent(parts[1] || ''),
+				encodedSkills: joined.slice(0, secondLastDot),
+				signature: joined.slice(secondLastDot + 1, lastDot),
+				encodedTotalSP: joined.slice(lastDot + 1),
+				encodedBalance: ''
+			};
+		}
+		if (lastDot > 0) {
+			return {
+				version: SHARE_URL_VERSION,
+				characterId: decodeURIComponent(parts[1] || ''),
+				encodedSkills: joined.slice(0, lastDot),
+				signature: joined.slice(lastDot + 1),
+				encodedTotalSP: '',
+				encodedBalance: ''
+			};
+		}
+	}
+
+	const params = new URLSearchParams(window.location.search);
+	return {
+		version: Number(params.get('v') || SHARE_URL_VERSION),
+		characterId: String(params.get('character') || '').trim(),
+		encodedSkills: String(params.get('skills') || '').trim(),
+		signature: String(params.get('sig') || '').trim(),
+		encodedTotalSP: String(params.get('sp') || '').trim(),
+		encodedBalance: String(params.get('isk') || params.get('bal') || '').trim()
+	};
+}
+
 async function renderLoggedInHome() {
 	const characters = await window.esi.getLoggedInCharacters();
 	const currentCharId = String(window.esi.whoami.character_id);
@@ -387,7 +807,13 @@ async function renderCharacterPage(charName, tab = 'overview') {
 		corporation: data.corporation,
 		alliance: data.alliance,
 		training: data.training,
-		showBalance: true
+		showBalance: true,
+		actions: activeTab === 'overview' ? renderCharacterShareControls({
+			character: data.character,
+			skills: data.skills || [],
+			totalSP: data.totalSP || 0,
+			lastUpdatedAt: data.lastUpdatedAt || null
+		}) : null
 	}));
 	page.appendChild(renderCharMenu({ charName: data.character.name, activeTab }));
 
@@ -1705,6 +2131,10 @@ async function fetchSkillsOverview(characterId) {
 	});
 
 	const maxQueuedLevels = new Map();
+	const activeQueueRow = queue[0] || null;
+	const activeTrainingSkillId = Number(activeQueueRow?.skill_id || 0);
+	const activeTrainingStartMs = activeQueueRow?.start_date ? Date.parse(activeQueueRow.start_date) : 0;
+	const activeTrainingEndMs = activeQueueRow?.finish_date ? Date.parse(activeQueueRow.finish_date) : 0;
 	for (const row of queue) {
 		const existing = maxQueuedLevels.get(row.skill_id) || 0;
 		maxQueuedLevels.set(row.skill_id, Math.max(existing, Number(row.finished_level || 0)));
@@ -1714,6 +2144,7 @@ async function fetchSkillsOverview(characterId) {
 		const typeInfo = typeInfos.get(row.skill_id);
 		const groupInfo = groupInfos.get(typeInfo?.group_id);
 		const activeQueue = queue.find((q) => q.skill_id === row.skill_id);
+		const isCurrentlyTraining = Number(row.skill_id || 0) === activeTrainingSkillId && activeTrainingEndMs > Date.now();
 		return {
 			typeName: typeInfo?.name || `Skill ${row.skill_id}`,
 			typeID: row.skill_id,
@@ -1722,7 +2153,10 @@ async function fetchSkillsOverview(characterId) {
 			skillPoints: Number(row.skillpoints_in_skill || 0),
 			level: Number(row.trained_skill_level ?? row.active_skill_level ?? 0),
 			training: activeQueue ? Number(activeQueue.finished_level || 0) : 0,
-			queue: maxQueuedLevels.get(row.skill_id) || 0
+			queue: maxQueuedLevels.get(row.skill_id) || 0,
+			isCurrentlyTraining,
+			trainingStartMs: isCurrentlyTraining ? (activeTrainingStartMs || 0) : 0,
+			trainingEndMs: isCurrentlyTraining ? (activeTrainingEndMs || 0) : 0
 		};
 	}).sort((a, b) => (a.groupName || '').localeCompare(b.groupName || '') || a.typeName.localeCompare(b.typeName));
 

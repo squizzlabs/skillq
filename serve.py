@@ -17,6 +17,30 @@ from urllib.parse import unquote, urlparse
 class SpaFallbackHandler(SimpleHTTPRequestHandler):
     """Serve static assets and return 404.html for unknown app routes."""
 
+    SPA_ROUTE_PREFIXES = (
+        "/char/",
+        "/item/",
+        "/share/",
+    )
+
+    SPA_ROUTE_EXACT = {
+        "/",
+        "/readme",
+        "/readme/",
+        "/share",
+        "/share/",
+        "/manage",
+        "/manage/",
+        "/settings",
+        "/settings/",
+        "/account",
+        "/account/",
+        "/auth",
+        "/login",
+        "/login-check",
+        "/logout",
+    }
+
     def serve_404_page(self):
         fallback_path = Path(self.directory) / "404.html"
         if not fallback_path.is_file():
@@ -33,6 +57,11 @@ class SpaFallbackHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         request_path = unquote(parsed.path)
 
+        is_known_spa_route = (
+            request_path in self.SPA_ROUTE_EXACT
+            or any(request_path.startswith(prefix) for prefix in self.SPA_ROUTE_PREFIXES)
+        )
+
         # Serve real files when present.
         fs_path = Path(self.directory) / request_path.lstrip("/")
         if fs_path.is_file():
@@ -42,6 +71,11 @@ class SpaFallbackHandler(SimpleHTTPRequestHandler):
         if fs_path.is_dir():
             if (fs_path / "index.html").is_file():
                 return super().send_head()
+            return self.serve_404_page()
+
+        # Known SPA routes should always use the custom 404 page fallback,
+        # even when a compact route contains dots (e.g. /share/...<blob>.<sig>).
+        if is_known_spa_route:
             return self.serve_404_page()
 
         # For extensionless app routes, return the custom 404 page.

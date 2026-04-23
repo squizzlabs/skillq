@@ -194,15 +194,16 @@ function renderCharCard({ character, training = null } = {}) {
 
 /* ─── Character Info header ──────────────────────────────────────────────────
  *
- * renderCharInfo({ character, corporation, alliance, training, showBalance })
+ * renderCharInfo({ character, corporation, alliance, training, showBalance, actions })
  *
  * character:    { character_id, name, corporation_id, alliance_id, balance }
  * corporation:  { corporation_id, name } | null
  * alliance:     { alliance_id, name }    | null
  * training:     { typeName, trainingEndMs, queueEmptyMs } | null
  * showBalance:  boolean (default true; false for shared views)
+ * actions:      HTMLElement | null
  */
-function renderCharInfo({ character, corporation = null, alliance = null, training = null, showBalance = true } = {}) {
+function renderCharInfo({ character, corporation = null, alliance = null, training = null, showBalance = true, actions = null } = {}) {
 	const { character_id, name, corporation_id, alliance_id, balance = 0 } = character;
 
 	const el = _el('div', 'sq-char-info');
@@ -252,6 +253,13 @@ function renderCharInfo({ character, corporation = null, alliance = null, traini
 	}
 
 	el.appendChild(details);
+
+	if (actions instanceof HTMLElement) {
+		const actionWrap = _el('div', 'sq-char-info__actions');
+		actionWrap.appendChild(actions);
+		el.appendChild(actionWrap);
+	}
+
 	return el;
 }
 
@@ -595,6 +603,134 @@ function renderCharTrain({ implants = [], suggestions = [] } = {}) {
 	return el;
 }
 
+function renderSharedCharSkills({ skills = [], totalSP = 0 } = {}) {
+	const el = _el('div', 'sq-skills');
+	const section = _el('section', 'sq-skill-groups');
+	const heading = _el('h4', 'sq-section-title');
+	const totalSpSummary = Number(totalSP || 0) > 0 ? `${numberFormat(totalSP, 0)} SP / ` : '';
+	heading.innerHTML = `Shared Skills <small>${totalSpSummary}${skills.length} Skills</small>`;
+	section.appendChild(heading);
+
+	const currentlyTraining = skills
+		.filter((skill) => Number(skill.trainingEndMs || 0) > Date.now())
+		.sort((left, right) => Number(left.trainingEndMs || 0) - Number(right.trainingEndMs || 0));
+
+	if (currentlyTraining.length > 0) {
+		const trainingSection = _el('section', 'sq-queue');
+		const trainingHeader = _el('h4', 'sq-section-title');
+		trainingHeader.innerHTML = `Skill Queue <small>(${currentlyTraining.length})</small>`;
+		trainingSection.appendChild(trainingHeader);
+
+		const trainingTable = document.createElement('table');
+		trainingTable.className = 'sq-table sq-table--striped';
+		const trainingHead = document.createElement('thead');
+		trainingHead.innerHTML = '<tr><th>Skill</th><th>Group</th><th>Finishes</th><th>Time Left</th></tr>';
+		const trainingBody = document.createElement('tbody');
+
+		for (const skill of currentlyTraining) {
+			const tr = document.createElement('tr');
+
+			const skillTd = document.createElement('td');
+			skillTd.dataset.label = 'Skill';
+			skillTd.appendChild(_a(`/item/${skill.typeID}/`, skill.typeName));
+			tr.appendChild(skillTd);
+
+			const groupTd = document.createElement('td');
+			groupTd.dataset.label = 'Group';
+			groupTd.textContent = skill.groupName || '';
+			tr.appendChild(groupTd);
+
+			const finishTd = document.createElement('td');
+			finishTd.dataset.label = 'Finishes';
+			finishTd.textContent = new Date(Number(skill.trainingEndMs || 0)).toLocaleString();
+			tr.appendChild(finishTd);
+
+			const leftTd = document.createElement('td');
+			leftTd.dataset.label = 'Time Left';
+			const countdown = _el('span', 'sq-countdown');
+			countdown.dataset.until = Number(skill.trainingEndMs || 0);
+			leftTd.appendChild(countdown);
+			tr.appendChild(leftTd);
+
+			trainingBody.appendChild(tr);
+		}
+
+		trainingTable.appendChild(trainingHead);
+		trainingTable.appendChild(trainingBody);
+		trainingSection.appendChild(trainingTable);
+		el.appendChild(trainingSection);
+	}
+
+	if (skills.length === 0) {
+		section.appendChild(_el('p', 'sq-muted', 'No shared overview skills are available.'));
+		el.appendChild(section);
+		return el;
+	}
+
+	const controls = _el('div', 'sq-skill-controls');
+	const addCtrl = (label, fn) => {
+		const btn = _el('button', 'sq-btn sq-btn--sm', label);
+		btn.addEventListener('click', fn);
+		controls.appendChild(btn);
+	};
+	addCtrl('Expand All', () => section.querySelectorAll('.sq-skill-row').forEach((row) => { row.hidden = false; }));
+	addCtrl('Collapse All', () => section.querySelectorAll('.sq-skill-row').forEach((row) => { row.hidden = true; }));
+	section.appendChild(controls);
+
+	const grouped = new Map();
+	for (const skill of skills) {
+		if (!grouped.has(skill.groupID)) grouped.set(skill.groupID, { name: skill.groupName, count: 0, skills: [] });
+		const group = grouped.get(skill.groupID);
+		group.count += 1;
+		group.skills.push(skill);
+	}
+
+	for (const [, group] of grouped) {
+		const groupEl = _el('div', 'sq-skill-group');
+		const header = _el('button', 'sq-skill-group__header');
+		header.setAttribute('aria-expanded', 'false');
+		header.innerHTML = `<span>${group.name}</span><em>${group.count} Skills</em>`;
+		header.addEventListener('click', () => {
+			const open = header.getAttribute('aria-expanded') === 'true';
+			header.setAttribute('aria-expanded', String(!open));
+			groupEl.querySelectorAll('.sq-skill-row').forEach((row) => { row.hidden = open; });
+		});
+		groupEl.appendChild(header);
+
+		const table = document.createElement('table');
+		table.className = 'sq-table sq-table--compact';
+		const tbody = document.createElement('tbody');
+
+		for (const skill of group.skills) {
+			const tr = document.createElement('tr');
+			tr.className = 'sq-skill-row' + (skill.level === 5 ? ' sq-skill-row--v' : '');
+			tr.hidden = true;
+
+			const nameTd = document.createElement('td');
+			nameTd.appendChild(_a(`/item/${skill.typeID}/`, skill.typeName));
+			if (Number(skill.trainingEndMs || 0) > Date.now()) {
+				nameTd.appendChild(_el('em', 'sq-skill-sp', ' training'));
+			}
+
+			const pipTd = _el('td', 'sq-skill-pip-cell');
+			pipTd.appendChild(_skillPips(skill.level, skill.training || 0, skill.queue || 0));
+
+			tr.appendChild(nameTd);
+			tr.appendChild(pipTd);
+			tbody.appendChild(tr);
+		}
+
+		table.appendChild(tbody);
+		groupEl.appendChild(table);
+		section.appendChild(groupEl);
+	}
+
+	const note = _el('p', 'sq-muted', 'Shared links include skill levels and active training timing, not wallet data or exact accumulated SP.');
+	section.appendChild(note);
+	el.appendChild(section);
+	return el;
+}
+
 /* ─── Exports ────────────────────────────────────────────────────────────────── */
 window.renderNavbar    = renderNavbar;
 window.renderCharCard  = renderCharCard;
@@ -603,3 +739,4 @@ window.renderCharMenu  = renderCharMenu;
 window.renderCharSkills = renderCharSkills;
 window.renderCharWallet = renderCharWallet;
 window.renderCharTrain  = renderCharTrain;
+window.renderSharedCharSkills = renderSharedCharSkills;
