@@ -66,6 +66,10 @@ class DexieStore {
 		await this.table.delete(key);
 	}
 
+	async clearAll() {
+		await this.table.clear();
+	}
+
 	async clearExpired() {
 		return await this.table.where('expiresAt').below(Date.now()).delete();
 	}
