@@ -82,7 +82,7 @@ class SimpleESI {
 
 		// user info and cache
 		this.whoami = null;
-		this.initWhoami();
+		this.ready = this.initWhoami();
 
 		// Attach DOM event handlers
 		document.addEventListener('DOMContentLoaded', this.domLoaded.bind(this));
@@ -99,24 +99,25 @@ class SimpleESI {
 		return this.options[name] ?? defaultValue;
 	}
 
-	initWhoami() {
-		if (localStorage.getItem('loggedout') === 'true') {
-			this.whoami = null;
-			return;
-		}
-
-		let whoamiinit = localStorage.getItem('whoami');
-		if (whoamiinit === null) {
-			this.whoami = null;
-			return;
-		}
-
+	async initWhoami() {
 		try {
-			this.whoami = JSON.parse(whoamiinit);
+			const loggedOut = await this.store.get('simpleesi-global-loggedout');
+			if (loggedOut === 'true') {
+				this.whoami = null;
+				return;
+			}
+
+			const whoamiInit = await this.store.get('simpleesi-global-whoami');
+			if (whoamiInit === null || whoamiInit === undefined) {
+				this.whoami = null;
+				return;
+			}
+
+			this.whoami = JSON.parse(whoamiInit);
 		} catch (err) {
-			this.errorlogger('Failed to parse whoami from localStorage:', err);
+			this.errorlogger('Failed to initialize whoami from Dexie:', err);
 			this.whoami = null;
-			localStorage.removeItem('whoami');
+			await this.store.delete('simpleesi-global-whoami');
 		}
 	}
 
@@ -133,14 +134,15 @@ class SimpleESI {
 	}
 
 	async authLogout(destructive = true) {
+		await this.ready;
 		if (destructive) {
-			localStorage.clear();
-			await this.lsSet('logged_in_characters', null, true);
+			this.whoami = null;
 			await this.store.destroyDB();
-			alert('You have been logged out. All cached data has been cleared.');
+			this.store = new DexieStore('simpleesi-db', 'simpleesi-store', 5 * 60 * 1000);
+			this.ready = Promise.resolve();
 		} else {
-			localStorage.setItem('loggedout', 'true');
-			alert('You have been logged out.');
+			await this.store.set('simpleesi-global-loggedout', 'true');
+			this.whoami = null;
 		}
 
 		window.location = '/';
@@ -149,8 +151,10 @@ class SimpleESI {
 
 	async authCallback() {
 		try {
+			await this.ready;
 			const params = Object.fromEntries(new URLSearchParams(window.location.search));
-			if (decodeURIComponent(params.state) !== localStorage.getItem('state')) {
+			const expectedState = await this.store.get('simpleesi-global-state');
+			if (decodeURIComponent(params.state) !== expectedState) {
 				// Something went very wrong, try again
 				return this.authBegin();
 			}
@@ -159,7 +163,7 @@ class SimpleESI {
 				grant_type: 'authorization_code',
 				code: params.code,
 				client_id: this.ssoClientId,
-				code_verifier: localStorage.getItem('code_verifier')
+				code_verifier: await this.store.get('simpleesi-global-code_verifier')
 			};
 
 			let res = await this.doRequest(this.ssoTokenUrl, 'POST', this.mimetypeForm, body);
@@ -179,11 +183,14 @@ class SimpleESI {
 			this.whoami = this.parseJwtPayload(json.access_token);
 			this.whoami.character_id = this.whoami.sub.replace('CHARACTER:EVE:', '');
 
-			localStorage.setItem('whoami', JSON.stringify(this.whoami));
-			localStorage.setItem(`whoami-${this.whoami.character_id}`, JSON.stringify(this.whoami));
+			await this.store.set('simpleesi-global-whoami', JSON.stringify(this.whoami));
+			await this.store.set(`simpleesi-global-whoami-${this.whoami.character_id}`, JSON.stringify(this.whoami));
 			await this.lsSet('whoami', this.whoami);
 			await this.lsSet('authed_json', json);
-			localStorage.removeItem('loggedout');
+			await this.store.delete('simpleesi-global-loggedout');
+			await this.store.delete('simpleesi-global-state');
+			await this.store.delete('simpleesi-global-code_verifier');
+			await this.store.delete('simpleesi-global-code_challenge');
 
 			window.location = '/';
 		} catch (err) {
@@ -197,7 +204,8 @@ class SimpleESI {
 	 * @param {Number} character_id 
 	 * @returns 
 	 */
-	changeCharacter(character_id) {
+	async changeCharacter(character_id) {
+		await this.ready;
 		// No change
 		if (!this.whoami) {
 			throw new Error('Cannot change character: not authenticated');
@@ -205,7 +213,7 @@ class SimpleESI {
 		
 		if (this.whoami.character_id === character_id) return false;
 
-		const raw_whoami = localStorage.getItem(`whoami-${character_id}`);
+		const raw_whoami = await this.store.get(`simpleesi-global-whoami-${character_id}`);
 		if (!raw_whoami) {
 			throw new Error(`${character_id} is not an authenticated character!`);
 		}
@@ -213,8 +221,7 @@ class SimpleESI {
 		try {
 			const next_whoami = JSON.parse(raw_whoami);
 			this.whoami = next_whoami;
-			localStorage.setItem('whoami', raw_whoami);
-			this.initWhoami();
+			await this.store.set('simpleesi-global-whoami', raw_whoami);
 			return true;
 		} catch (err) {
 			this.errorlogger('Failed to parse stored character data:', err);
@@ -372,18 +379,22 @@ class SimpleESI {
 	}
 
 	async authBegin() {
-		localStorage.setItem('code_verifier', await this.generateCodeVerifier());
-		localStorage.setItem('code_challenge', await this.generateCodeChallenge(localStorage.getItem('code_verifier')));
-		localStorage.setItem('state', this.createRandomString(32));
+		await this.ready;
+		const codeVerifier = await this.generateCodeVerifier();
+		const codeChallenge = await this.generateCodeChallenge(codeVerifier);
+		const state = this.createRandomString(32);
+		await this.store.set('simpleesi-global-code_verifier', codeVerifier);
+		await this.store.set('simpleesi-global-code_challenge', codeChallenge);
+		await this.store.set('simpleesi-global-state', state);
 
 		const params = new URLSearchParams({
 			response_type: 'code',
 			redirect_uri: this.callbackUrl,
 			client_id: this.ssoClientId,
 			scope: this.scopes,
-			code_challenge: localStorage.getItem('code_challenge'),
+			code_challenge: codeChallenge,
 			code_challenge_method: 'S256',
-			state: localStorage.getItem('state')
+			state: state
 		}).toString();
 		window.location = `${this.ssoAuthUrl}?${params}`;
 	}

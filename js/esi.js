@@ -1,4 +1,4 @@
-let esi;
+window.esi = null;
 
 const APP_NAME = 'SkillQ (skillq.net - Squizz Caphinator)';
 const localhost = window.location.hostname === 'localhost';
@@ -6,7 +6,7 @@ const ssoLocalClientId = 'a4a7c16cc97440afb765f8fee441ef5a';
 const ssoPublicClientId = 'd614c2c75a9e4e509219f2c10f546fc3';
 
 if (window.location.hostname === '127.0.0.1') {
-	window.location.replace('http://localhost:' + window.location.port + window.location.pathname + window.location.search + window.location.hash);
+	window.location = 'http://localhost:' + window.location.port + window.location.pathname + window.location.search + window.location.hash;
 } else {
 	(() => {
 		try {
@@ -18,12 +18,13 @@ if (window.location.hostname === '127.0.0.1') {
 				'/auth';
 			console.log('Initializing ESI with callback URL:', callbackUrl);
 
-			esi = new SimpleESI({
+			window.esi = new SimpleESI({
 				appName: APP_NAME,
 				clientID: localhost ? ssoLocalClientId : ssoPublicClientId,
-				authURL: '/login',
-				callbackUrl,
+				loginURL: '/login',
+				authURL: '/auth',
 				logoutURL: '/logout',
+				callbackUrl,
 				scopes: [
 					"publicData",
 					"esi-skills.read_skills.v1",

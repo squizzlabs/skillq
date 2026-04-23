@@ -12,7 +12,7 @@
 			const target = new URL('index.html', url.href);
 			target.searchParams.set('route', url.pathname);
 			target.searchParams.set('routeQuery', url.search);
-			window.location.replace(target.toString());
+			window.location = target.toString();
 		})();
 	</script>
 </head>

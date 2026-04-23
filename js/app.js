@@ -1,25 +1,7 @@
 const githubhash = "";
 
 document.addEventListener('DOMContentLoaded', doBtnBinds);
-document.addEventListener('DOMContentLoaded', () => {
-	void main().catch((err) => {
-		console.error('main() failed:', err);
-	});
-});
-let quill;
-
-const timeouts = {};
-function addTimeout(f, timeout) {
-	clearTimeout(timeouts[f.name]); // clear existing timeout for same function name
-	timeouts[f.name] = _setTimeout(f, timeout);
-}
-function clearTimeouts() {
-	for (const t of Object.values(timeouts)) {
-		clearTimeout(t);
-	}
-}
-const _setTimeout = setTimeout;
-setTimeout = addTimeout;
+document.addEventListener('DOMContentLoaded', main);
 
 function doBtnBinds() {
 	// bind buttons with class btn-bind to a function equivalent to the button's id
@@ -32,9 +14,68 @@ function doBtnBinds() {
 }
 
 async function main() {
-	console.log('app.js main() starting');
+	try {
+		console.log('app.js main() starting');
+		if (window.esi?.ready) {
+			await window.esi.ready;
+		}
+		if (!window.esi) {
+			throw new Error('ESI initialization failed or not available');
+		}
 
-	if (window.location.pathname === '/auth') {
-		history.replaceState(null, '', '/');
+		switch (window.location.pathname) {
+			case '/auth':
+				break;
+			case '/login-check':
+				if (window.esi.whoami === null) {
+					console.log('not logged in');
+					return await window.esi.authBegin();
+				}
+				break;
+			default:
+		}
+
+		// Check if user is logged in
+		if (window.esi.whoami === null) {
+			// Not logged in: load and render README
+			await loadReadme();
+			document.getElementById('about').classList.remove('d-none');
+			return;
+		}
+	} catch (err) {
+		console.error('Error in main():', err);
+		document.getElementById('about').innerHTML = '<p>Error during initialization. <a href="/login">Click here to login</a>.</p>';
+		document.getElementById('about').classList.remove('d-none');
+		return;
+	}
+}
+
+async function loadReadme() {
+	try {
+		const response = await fetch('/README.md');
+		if (!response.ok) throw new Error(`Failed to fetch README: ${response.status}`);
+		const markdown = await response.text();
+		
+		// Wait for marked.js to load
+		if (typeof marked === 'undefined') {
+			console.warn('marked.js not loaded yet, retrying...');
+			await new Promise(resolve => setTimeout(resolve, 100));
+			return loadReadme();
+		}
+		
+		// Convert markdown to HTML and inject
+		const html = marked.parse(markdown);
+		const about = document.getElementById('about');
+		about.innerHTML = html;
+		// Rewrite skillq.net URLs to local paths
+		about.querySelectorAll('a[href^="https://skillq.net/"]').forEach(a => {
+			a.href = a.getAttribute('href').replace('https://skillq.net', '');
+		});
+		about.querySelectorAll('img[src^="https://skillq.net/"]').forEach(img => {
+			img.src = img.getAttribute('src').replace('https://skillq.net', '');
+		});
+	} catch (err) {
+		console.error('Failed to load README:', err);
+		document.getElementById('about').innerHTML = '<p>Error loading README. <a href="/login">Click here to login</a>.</p>';
 	}
 }

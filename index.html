@@ -19,16 +19,29 @@
   </script>
 
   <script defer src="https://cdn.jsdelivr.net/npm/dexie@4/dist/dexie.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script defer src="/js/DexieStore.js"></script>
+  <script defer src="/js/helpers.js"></script>
+  <script defer src="/js/components.js"></script>
   <script defer src="/js/SimpleESI.js"></script>
   <script defer src="/js/esi.js"></script>
   <script defer src="/js/tools.js"></script>
   <script defer src="/js/app.js"></script>
 </head>
 <body>
-  <main>
-    <h1>SkillQ</h1>
-    <p>Scripts loaded. Open the console to inspect runtime logs.</p>
-  </main>
+
+  <!-- Navbar (injected by components.js via app.js) -->
+  <div id="navbar-root"></div>
+
+  <!-- Logged-in app shell (hidden until authenticated) -->
+  <div id="skillq" class="d-none">
+    <div id="char-cards-root" class="sq-char-cards"></div>
+    <div id="net-summary" class="sq-net-summary d-none"></div>
+    <div id="char-view-root"></div>
+  </div>
+
+  <!-- Not logged in: README content injected here -->
+  <div id="about" class="sq-hero d-none"></div>
+
 </body>
 </html>
