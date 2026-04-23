@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>SkillQ.net</title>
+	<link rel="stylesheet" href="/css/skillq.css" />
+
+	<script>
+		(function () {
+			const url = new URL(window.location.href);
+			const target = new URL('index.html', url.href);
+			target.searchParams.set('route', url.pathname);
+			target.searchParams.set('routeQuery', url.search);
+			window.location.replace(target.toString());
+		})();
+	</script>
+</head>
+<body>
+</body>
+</html>

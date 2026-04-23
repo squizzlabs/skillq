@@ -1,0 +1,37 @@
+:root {
+	--bg: #f6f8fb;
+	--fg: #1f2937;
+	--muted: #4b5563;
+	--card: #ffffff;
+	--border: #d1d5db;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+	background: radial-gradient(circle at top, #ffffff 0%, var(--bg) 55%);
+	color: var(--fg);
+}
+
+main {
+	max-width: 760px;
+	margin: 3rem auto;
+	padding: 1.25rem 1.5rem;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--card);
+}
+
+h1 {
+	margin: 0 0 0.5rem;
+	font-size: 1.8rem;
+}
+
+p {
+	margin: 0;
+	color: var(--muted);
+}
