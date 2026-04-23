@@ -133,7 +133,7 @@ class SimpleESI {
 		}
 	}
 
-	async authLogout(destructive = true) {
+	async authLogout(destructive = true, redirectToRoot = true) {
 		await this.ready;
 		if (destructive) {
 			this.whoami = null;
@@ -145,13 +145,23 @@ class SimpleESI {
 			this.whoami = null;
 		}
 
-		window.location = '/';
+		if (redirectToRoot) {
+			window.location = '/';
+		}
 		return false;
 	}
 
 	async authCallback() {
 		try {
 			await this.ready;
+			let previousWhoami = null;
+			try {
+				const previousWhoamiRaw = await this.store.get('simpleesi-global-whoami');
+				if (previousWhoamiRaw) previousWhoami = JSON.parse(previousWhoamiRaw);
+			} catch (_) {
+				previousWhoami = null;
+			}
+
 			const params = Object.fromEntries(new URLSearchParams(window.location.search));
 			const expectedState = await this.store.get('simpleesi-global-state');
 			if (decodeURIComponent(params.state) !== expectedState) {
@@ -192,6 +202,16 @@ class SimpleESI {
 			await this.store.delete('simpleesi-global-code_verifier');
 			await this.store.delete('simpleesi-global-code_challenge');
 
+			// If this was an "Add Character" flow, keep the previously active character selected.
+			if (
+				previousWhoami &&
+				previousWhoami.character_id &&
+				String(previousWhoami.character_id) !== String(this.whoami.character_id)
+			) {
+				this.whoami = previousWhoami;
+				await this.store.set('simpleesi-global-whoami', JSON.stringify(previousWhoami));
+			}
+
 			window.location = '/';
 		} catch (err) {
 			this.errorlogger('Authentication callback error:', err);
@@ -227,6 +247,39 @@ class SimpleESI {
 			this.errorlogger('Failed to parse stored character data:', err);
 			throw new Error(`Invalid character data for ${character_id}`);
 		}
+	}
+
+	async getLoggedInCharacters() {
+		await this.ready;
+		const prefix = 'simpleesi-global-whoami-';
+		const rows = await this.store.table.where('key').startsWith(prefix).toArray();
+		const characters = [];
+
+		for (const row of rows) {
+			try {
+				const who = JSON.parse(row.value);
+				if (!who || !who.character_id) continue;
+				characters.push({
+					character_id: String(who.character_id),
+					name: who.name || `Character ${who.character_id}`
+				});
+			} catch (_) {
+				// Ignore malformed entries.
+			}
+		}
+
+		if (this.whoami?.character_id) {
+			const currentId = String(this.whoami.character_id);
+			if (!characters.find((c) => c.character_id === currentId)) {
+				characters.push({
+					character_id: currentId,
+					name: this.whoami.name || `Character ${currentId}`
+				});
+			}
+		}
+
+		characters.sort((a, b) => a.name.localeCompare(b.name));
+		return characters;
 	}
 
 	async doJsonAuthRequest(url, method = 'GET', headers = null, body = null, character_id = this.whoami?.character_id) {
@@ -437,7 +490,7 @@ class SimpleESI {
 		if (await this.lsGet('access_token', character_id) === 'undefined') await this.lsDel('access_token', character_id);
 		let access_token_expires = parseInt(await this.lsGet('access_token_expires', character_id) || '0');
 		if (access_token_expires < Date.now() || await this.lsGet('access_token', character_id) === null) {
-			let authed_json = await this.lsGet('authed_json');
+			let authed_json = await this.lsGet('authed_json', character_id);
 			if (authed_json === null) return this.authLogout();
 			const body = {
 				grant_type: 'refresh_token',

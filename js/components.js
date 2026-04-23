@@ -70,6 +70,7 @@ function renderNavbar({ characters = [], currentCharId = null, isLoggedIn = fals
 		for (const char of characters) {
 			const a = _a(`/char/${encodeURIComponent(char.name)}`, null, 'sq-nav__char-link');
 			if (char.character_id == currentCharId) a.classList.add('sq-nav__char-link--active');
+			a.dataset.characterId = String(char.character_id);
 			a.title = char.name;
 			a.appendChild(_img(
 				`https://images.evetech.net/characters/${char.character_id}/portrait?size=32`,

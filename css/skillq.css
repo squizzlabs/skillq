@@ -317,6 +317,30 @@ z-index: 200;
   box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
+.sq-char-view {
+	max-width: 960px;
+	margin: 0 auto 1rem;
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+	overflow: hidden;
+}
+
+.sq-alert {
+	margin: 0.75rem;
+	padding: 0.65rem 0.85rem;
+	background: #fcf8e3;
+	border: 1px solid #fbeed5;
+	border-radius: 4px;
+	color: #8a6d3b;
+	font-size: 0.9rem;
+}
+
+.sq-char-note {
+	padding: 0 0.75rem 0.75rem;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    CHARACTER INFO HEADER
 ═══════════════════════════════════════════════════════════════ */
