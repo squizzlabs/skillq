@@ -1,4 +1,3 @@
-const githubhash = "";
 let routerInitialized = false;
 const ESI_BASE = 'https://esi.evetech.net';
 const LOOKUP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -362,27 +361,6 @@ function renderCharacterShareControls({ character, skills = [], totalSP = 0, las
 	return button;
 }
 
-function buildShareSkillRecords(skills, queueWindowsBySkillId = null) {
-	return (skills || [])
-		.map((skill) => {
-			const record = {
-				type_id: Number(skill.typeID || 0),
-				level: Math.max(0, Math.min(5, Number(skill.level || 0)))
-			};
-			const queueWindow = queueWindowsBySkillId?.get(Number(skill.typeID || 0)) || null;
-			const trainingStartMs = Number(queueWindow?.startMs || 0);
-			const trainingEndMs = Number(queueWindow?.endMs || 0);
-			if (trainingStartMs > 0) {
-				record.training_start = Math.floor(trainingStartMs / 1000);
-			}
-			if (trainingEndMs > 0) {
-				record.training_end = Math.floor(trainingEndMs / 1000);
-			}
-			return record;
-		})
-		.filter((record) => record.type_id > 0);
-}
-
 async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 	if (typeof SkillUrlCodecSafe === 'undefined') {
 		throw new Error('Share codec is not available.');
@@ -392,7 +370,7 @@ async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 		throw new Error('Character information is missing.');
 	}
 	const queueResponse = await window.esi
-		.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue/?datasource=tranquility`, 'GET', null, null, characterId)
+		.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId)
 		.catch(() => []);
 	const queue = (Array.isArray(queueResponse) ? queueResponse : [])
 		.slice(0, 25)
@@ -501,8 +479,8 @@ function findCurrentCorporationHistoryEntry(historyRows, corporationId) {
 
 async function getCharacterShareContext(characterId) {
 	const [charInfo, history] = await Promise.all([
-		window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}/?datasource=tranquility`),
-		window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}/corporationhistory/?datasource=tranquility`)
+		window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}`),
+		window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}/corporationhistory`)
 	]);
 
 	const corporationId = Number(charInfo?.corporation_id || 0);
@@ -1594,7 +1572,7 @@ async function renderItemPage(itemId) {
 	let typeInfo = null;
 	let groupInfo = null;
 	try {
-		typeInfo = await window.esi.doJsonRequest(`${ESI_BASE}/universe/types/${parsedItemId}/?datasource=tranquility&language=en`);
+		typeInfo = await window.esi.doJsonRequest(`${ESI_BASE}/universe/types/${parsedItemId}?language=en`);
 	} catch (_) {
 		try {
 			typeInfo = await getTypeInfo(parsedItemId);
@@ -1653,7 +1631,7 @@ async function renderItemPage(itemId) {
 	}
 
 	if (enables.length > 0) {
-		container.appendChild(_createItemEnablesSection(parsedItemId, typeInfo.name, enables));
+		container.appendChild(_createItemEnablesSection(typeInfo.name, enables));
 	}
 
 	const table = document.createElement('table');
@@ -1929,7 +1907,7 @@ function _createItemRequirementsSection(requirements) {
 	return section;
 }
 
-function _createItemEnablesSection(itemTypeId, itemName, enables) {
+function _createItemEnablesSection(itemName, enables) {
 	const section = document.createElement('section');
 	section.className = 'sq-item__section sq-item__block';
 
@@ -2298,9 +2276,9 @@ async function refreshCharacterSummaryInBackground(characterId, characterName) {
 
 	try {
 		const [balance, skills, queue] = await Promise.all([
-			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet/?datasource=tranquility`, 'GET', null, null, characterId),
-			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills/?datasource=tranquility`, 'GET', null, null, characterId),
-			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue/?datasource=tranquility`, 'GET', null, null, characterId)
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet`, 'GET', null, null, characterId),
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId),
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId)
 		]);
 
 		let training = null;
@@ -2538,9 +2516,9 @@ async function shouldRefreshCharacterData(key) {
 
 async function fetchCharacterCommonData(characterId) {
 	const [charInfo, balance, queue] = await Promise.all([
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/?datasource=tranquility`, 'GET', null, null, characterId),
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet/?datasource=tranquility`, 'GET', null, null, characterId),
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue/?datasource=tranquility`, 'GET', null, null, characterId).catch(() => [])
+		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}`, 'GET', null, null, characterId),
+		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet`, 'GET', null, null, characterId),
+		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId).catch(() => [])
 	]);
 
 	const [corporation, alliance] = await Promise.all([
@@ -2580,8 +2558,8 @@ async function fetchCharacterCommonData(characterId) {
 
 async function fetchSkillsOverview(characterId) {
 	const [skillsResponse, queueResponse] = await Promise.all([
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills/?datasource=tranquility`, 'GET', null, null, characterId),
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue/?datasource=tranquility`, 'GET', null, null, characterId).catch(() => [])
+		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId),
+		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId).catch(() => [])
 	]);
 
 	const skills = skillsResponse?.skills || [];
@@ -2709,7 +2687,7 @@ function applyOverviewTrainingToCommonData(data, queueRows) {
 }
 
 async function fetchWalletRows(characterId) {
-	const rows = await window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet/journal/?datasource=tranquility&page=1`, 'GET', null, null, characterId).catch(() => []);
+	const rows = await window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet/journal?page=1`, 'GET', null, null, characterId).catch(() => []);
 	const ids = Array.from(new Set(rows.flatMap((row) => [row.first_party_id, row.second_party_id]).filter((id) => Number(id) > 0)));
 	const names = await resolveUniverseNames(ids);
 
@@ -2726,9 +2704,9 @@ async function fetchWalletRows(characterId) {
 
 async function fetchTrainingSuggestions(characterId) {
 	const [attributes, implants, skillsResponse] = await Promise.all([
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/attributes/?datasource=tranquility`, 'GET', null, null, characterId).catch(() => null),
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/implants/?datasource=tranquility`, 'GET', null, null, characterId).catch(() => []),
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills/?datasource=tranquility`, 'GET', null, null, characterId).catch(() => ({ skills: [] }))
+		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/attributes`, 'GET', null, null, characterId).catch(() => null),
+		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/implants`, 'GET', null, null, characterId).catch(() => []),
+		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId).catch(() => ({ skills: [] }))
 	]);
 
 	const implantInfos = await Promise.all((implants || []).slice(0, 5).map((typeId) => getTypeInfo(typeId)));
@@ -2795,7 +2773,7 @@ async function getTypeInfo(typeId) {
 		}
 	}
 	try {
-		const remoteInfo = await window.esi.doJsonRequest(`${ESI_BASE}/universe/types/${typeId}/?datasource=tranquility&language=en`);
+		const remoteInfo = await window.esi.doJsonRequest(`${ESI_BASE}/universe/types/${typeId}?language=en`);
 		const info = {
 			...(localInfo || {}),
 			...(cached || {}),
@@ -2838,7 +2816,7 @@ async function getGroupInfo(groupId) {
 		return info;
 	}
 	try {
-		const info = await window.esi.doJsonRequest(`${ESI_BASE}/universe/groups/${groupId}/?datasource=tranquility&language=en`);
+		const info = await window.esi.doJsonRequest(`${ESI_BASE}/universe/groups/${groupId}?language=en`);
 		groupInfoCache.set(groupId, info);
 		await lookupCacheSet(`group-info:${groupId}`, info);
 		return info;
@@ -2897,7 +2875,7 @@ async function resolveUniverseNames(ids) {
 	}
 	if (unresolved.length > 0) {
 		try {
-			const results = await window.esi.doJsonRequest(`${ESI_BASE}/universe/names/?datasource=tranquility`, 'POST', window.esi.mimetypeJson, JSON.stringify(unresolved));
+			const results = await window.esi.doJsonRequest(`${ESI_BASE}/universe/names`, 'POST', window.esi.mimetypeJson, JSON.stringify(unresolved));
 			for (const row of results || []) {
 				universeNameCache.set(row.id, row.name);
 				await lookupCacheSet(`universe-name:${row.id}`, row.name);
@@ -2916,7 +2894,7 @@ async function getCorporationInfo(corporationId) {
 	const cached = await lookupCacheGet(cacheKey);
 	if (cached) return cached;
 	try {
-		const info = await window.esi.doJsonRequest(`${ESI_BASE}/corporations/${corporationId}/?datasource=tranquility`);
+		const info = await window.esi.doJsonRequest(`${ESI_BASE}/corporations/${corporationId}`);
 		await lookupCacheSet(cacheKey, info);
 		return info;
 	} catch (_) {
@@ -2930,7 +2908,7 @@ async function getAllianceInfo(allianceId) {
 	const cached = await lookupCacheGet(cacheKey);
 	if (cached) return cached;
 	try {
-		const info = await window.esi.doJsonRequest(`${ESI_BASE}/alliances/${allianceId}/?datasource=tranquility`);
+		const info = await window.esi.doJsonRequest(`${ESI_BASE}/alliances/${allianceId}`);
 		await lookupCacheSet(cacheKey, info);
 		return info;
 	} catch (_) {
