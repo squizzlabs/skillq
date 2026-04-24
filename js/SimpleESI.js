@@ -350,7 +350,15 @@ class SimpleESI {
 
 			if (cachedData) {
 				// Are we within the Expires window? If so, return that data
-				if (cachedData.expires && new Date(cachedData.expires).getTime() > Date.now()) {
+				let useCache = cachedData.expires && new Date(cachedData.expires).getTime() > Date.now();
+
+				// If the time is between 10:59a UTC and 1110a UTC, ESI can be very unreliable. 
+				// During that time, only use cached data
+				const now = new Date();
+				const minute = now.getUTCHours() * 100 + now.getUTCMinutes();
+				useCache |= (minute >= 1059 && minute <= 1110);
+
+				if (useCache) {
 					return new Response(JSON.stringify(cachedData.data), {
 						status: 200,
 						statusText: 'OK (Cached)',
