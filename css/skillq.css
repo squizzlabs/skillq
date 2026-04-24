@@ -131,8 +131,8 @@ body.sq-layout-restricted .sq-char-cards,
 body.sq-layout-restricted .sq-net-summary,
 body.sq-layout-restricted .sq-char-view,
 body.sq-layout-restricted .sq-hero {
-	width: min(1000px, calc(100% - 2rem));
-	max-width: 1000px;
+	width: min(1100px, calc(100% - 2rem));
+	max-width: 1100px;
 	margin-left: auto;
 	margin-right: auto;
 }
@@ -154,7 +154,7 @@ a:hover { color: var(--link-hover); text-decoration: underline; }
 
 /* ── Hero / About (not logged in) ── */
 .sq-hero {
-	max-width: 1000px;
+	max-width: 1100px;
 	margin: 1.5rem auto;
 	padding: 0 1rem;
 }
@@ -457,14 +457,14 @@ z-index: 200;
 /* ═══════════════════════════════════════════════════════════════
    CHARACTER CARD (index/home page)
 ═══════════════════════════════════════════════════════════════ */
-.sq-char-cards { display: flex; flex-wrap: wrap; gap: 1rem; padding: 1rem; max-width: 1000px; margin: 0 auto; }
+.sq-char-cards { display: flex; flex-wrap: wrap; gap: 1rem; padding: 1rem; max-width: 1100px; margin: 0 auto; }
 .sq-char-card {
   display: flex; gap: 0.75rem;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.6rem;
-  width: 320px;
+  width: 340px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 
 .sq-loading {
@@ -525,8 +525,8 @@ z-index: 200;
 }
 
 body.sq-layout-restricted .sq-char-card {
-	width: 320px;
-	max-width: 320px;
+	width: 340px;
+	max-width: 340px;
 }
 .sq-char-card__portrait-link { flex-shrink: 0; }
 .sq-char-card__portrait { width: 128px; height: 128px; display: block; }
@@ -542,14 +542,14 @@ body.sq-layout-restricted .sq-char-card {
   border-radius: 4px;
   padding: 0.6rem 1rem;
   margin: 0 1rem 1rem;
-  max-width: 1000px;
+  max-width: 1100px;
   margin-left: auto; margin-right: auto;
   font-size: 0.875rem;
   box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
 .sq-char-view {
-	max-width: 1000px;
+	max-width: 1100px;
 	margin: 0 auto 1rem;
 	background: var(--card);
 	border: 1px solid var(--border);

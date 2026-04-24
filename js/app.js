@@ -717,7 +717,7 @@ async function renderSharedCharacterPage() {
 		const snapshotText = snapshotUnix > 0
 			? `Snapshot taken at ${formatDateTime(snapshotUnix * 1000)}. `
 			: '';
-		notice.textContent = `${snapshotText}Shared overview snapshot ready with skill queue, total SP, and ISK balance. This link will automatically invalidate if the character changes corporations.`;
+		notice.innerHTML = `<ul><li>${snapshotText}</li><li>This link will automatically invalidate if the character changes corporations.</li>`;
 		page.appendChild(notice);
 
 		page.appendChild(renderSharedCharSkills({ queue: sharedData.queue, skills: sharedData.skills, totalSP: sharedTotalSP }));
@@ -898,72 +898,159 @@ async function renderCharacterPage(charName, tab = 'overview') {
 	document.getElementById('net-summary').classList.add('d-none');
 
 	const charViewRoot = document.getElementById('char-view-root');
-	const page = document.createElement('div');
-	page.className = 'sq-char-view';
+	const infoSignature = buildCharacterInfoSignature(data);
+	const messageText = data.message || '';
 
-	if (data.message) {
+	let page = charViewRoot.querySelector('.sq-char-view[data-character-id]');
+	const canPatchInPlace = page && page.dataset.characterId === characterId;
+
+	const nextMenu = renderCharMenu({ charName: data.character.name, activeTab });
+	nextMenu.dataset.role = 'char-menu';
+	const nextContent = buildCharacterTabContent(data, activeTab);
+	nextContent.dataset.role = 'char-tab-content';
+
+	const nextActions = activeTab === 'overview' ? renderCharacterShareControls({
+		character: data.character,
+		skills: data.skills || [],
+		totalSP: data.totalSP || 0,
+		lastUpdatedAt: data.lastUpdatedAt || null
+	}) : null;
+
+	if (!canPatchInPlace) {
+		page = document.createElement('div');
+		page.className = 'sq-char-view';
+		page.dataset.characterId = characterId;
+		page.dataset.infoSignature = infoSignature;
+
 		const alert = document.createElement('div');
 		alert.className = 'sq-alert';
-		alert.textContent = data.message;
+		alert.dataset.role = 'char-message';
+		alert.hidden = !messageText;
+		alert.textContent = messageText;
 		page.appendChild(alert);
-	}
 
-	page.appendChild(renderCharInfo({
-		character: data.character,
-		corporation: data.corporation,
-		alliance: data.alliance,
-		training: data.training,
-		showBalance: true,
-		actions: activeTab === 'overview' ? renderCharacterShareControls({
+		const info = renderCharInfo({
 			character: data.character,
-			skills: data.skills || [],
-			totalSP: data.totalSP || 0,
-			lastUpdatedAt: data.lastUpdatedAt || null
-		}) : null
-	}));
-	page.appendChild(renderCharMenu({ charName: data.character.name, activeTab }));
-
-	if (activeTab === 'wallet') {
-		page.appendChild(renderCharWallet({ transactions: data.wallet || [] }));
-		if (data.lastUpdatedAt) {
-			const updated = document.createElement('p');
-			updated.className = 'sq-muted sq-char-note';
-			updated.textContent = `Last updated: ${formatDateTime(data.lastUpdatedAt)}`;
-			page.appendChild(updated);
-		}
-	} else if (activeTab === 'train') {
-		page.appendChild(renderCharTrain({ implants: data.implants || [], suggestions: data.suggestions || [] }));
-		if (data.lastUpdatedAt) {
-			const updated = document.createElement('p');
-			updated.className = 'sq-muted sq-char-note';
-			updated.textContent = `Last updated: ${formatDateTime(data.lastUpdatedAt)}`;
-			page.appendChild(updated);
-		}
+			corporation: data.corporation,
+			alliance: data.alliance,
+			training: data.training,
+			showBalance: true,
+			actions: nextActions
+		});
+		info.dataset.role = 'char-info';
+		page.appendChild(info);
+		page.appendChild(nextMenu);
+		page.appendChild(nextContent);
+		charViewRoot.replaceChildren(page);
 	} else {
-		page.appendChild(renderCharSkills({
-			queue: data.queue || [],
-			skills: data.skills || [],
-			totalSP: data.totalSP || 0,
-			unallocatedSP: data.unallocatedSP || 0
-		}));
-		if (data.lastUpdatedAt) {
-			const updated = document.createElement('p');
-			updated.className = 'sq-muted sq-char-note';
-			updated.textContent = `Last updated: ${formatDateTime(data.lastUpdatedAt)}`;
-			page.appendChild(updated);
+		const existingMessage = page.querySelector('[data-role="char-message"]');
+		if (existingMessage) {
+			existingMessage.hidden = !messageText;
+			existingMessage.textContent = messageText;
 		}
-		const note = document.createElement('p');
-		note.className = 'sq-muted sq-char-note';
-		note.textContent = 'ESI may return stale data until this specific character has logged into EVE recently.';
-		page.appendChild(note);
+
+		if (page.dataset.infoSignature !== infoSignature) {
+			const existingInfo = page.querySelector('[data-role="char-info"]');
+			const nextInfo = renderCharInfo({
+				character: data.character,
+				corporation: data.corporation,
+				alliance: data.alliance,
+				training: data.training,
+				showBalance: true,
+				actions: nextActions
+			});
+			nextInfo.dataset.role = 'char-info';
+			if (existingInfo) existingInfo.replaceWith(nextInfo);
+			page.dataset.infoSignature = infoSignature;
+		} else {
+			const actionWrap = page.querySelector('.sq-char-info__actions');
+			if (actionWrap) actionWrap.remove();
+			if (nextActions) {
+				const existingInfo = page.querySelector('[data-role="char-info"]');
+				if (existingInfo) {
+					const nextActionWrap = document.createElement('div');
+					nextActionWrap.className = 'sq-char-info__actions';
+					nextActionWrap.appendChild(nextActions);
+					existingInfo.appendChild(nextActionWrap);
+				}
+			}
+		}
+
+		const existingMenu = page.querySelector('[data-role="char-menu"]');
+		if (existingMenu) existingMenu.replaceWith(nextMenu);
+
+		const existingContent = page.querySelector('[data-role="char-tab-content"]');
+		if (existingContent) existingContent.replaceWith(nextContent);
 	}
 
-	charViewRoot.replaceChildren(page);
 	document.getElementById('about').classList.add('d-none');
 	document.getElementById('skillq').classList.remove('d-none');
 	startCountdowns();
 
 	void refreshCharacterPageInBackground(characterId, activeTab);
+}
+
+function buildCharacterInfoSignature(data) {
+	return JSON.stringify({
+		character: {
+			character_id: String(data?.character?.character_id || ''),
+			name: String(data?.character?.name || ''),
+			corporation_id: Number(data?.character?.corporation_id || 0),
+			alliance_id: Number(data?.character?.alliance_id || 0),
+			balance: Number(data?.character?.balance || 0)
+		},
+		corporationName: String(data?.corporation?.name || ''),
+		allianceName: String(data?.alliance?.name || ''),
+		training: {
+			typeName: String(data?.training?.typeName || ''),
+			level: Number(data?.training?.level || 0),
+			trainingEndMs: Number(data?.training?.trainingEndMs || 0),
+			queueEmptyMs: Number(data?.training?.queueEmptyMs || 0)
+		}
+	});
+}
+
+function buildCharacterTabContent(data, activeTab) {
+	const content = document.createElement('div');
+	if (activeTab === 'wallet') {
+		content.appendChild(renderCharWallet({ transactions: data.wallet || [] }));
+		if (data.lastUpdatedAt) {
+			const updated = document.createElement('p');
+			updated.className = 'sq-muted sq-char-note';
+			updated.textContent = `Last updated: ${formatDateTime(data.lastUpdatedAt)}`;
+			content.appendChild(updated);
+		}
+		return content;
+	}
+
+	if (activeTab === 'train') {
+		content.appendChild(renderCharTrain({ implants: data.implants || [], suggestions: data.suggestions || [] }));
+		if (data.lastUpdatedAt) {
+			const updated = document.createElement('p');
+			updated.className = 'sq-muted sq-char-note';
+			updated.textContent = `Last updated: ${formatDateTime(data.lastUpdatedAt)}`;
+			content.appendChild(updated);
+		}
+		return content;
+	}
+
+	content.appendChild(renderCharSkills({
+		queue: data.queue || [],
+		skills: data.skills || [],
+		totalSP: data.totalSP || 0,
+		unallocatedSP: data.unallocatedSP || 0
+	}));
+	if (data.lastUpdatedAt) {
+		const updated = document.createElement('p');
+		updated.className = 'sq-muted sq-char-note';
+		updated.textContent = `Last updated: ${formatDateTime(data.lastUpdatedAt)}`;
+		content.appendChild(updated);
+	}
+	const note = document.createElement('p');
+	note.className = 'sq-muted sq-char-note';
+	note.textContent = 'ESI may return stale data until this specific character has logged into EVE recently.';
+	content.appendChild(note);
+	return content;
 }
 
 async function renderManagePage() {
@@ -2545,13 +2632,51 @@ async function cacheGetCharacterData(key) {
 	}
 }
 
+function normalizeCharacterCacheValueForCompare(key, value) {
+	if (value == null) return value;
+	if (key === LAST_BACKGROUND_REFRESH_KEY) return value;
+	if (typeof value !== 'object' || Array.isArray(value)) return value;
+	const clone = { ...value };
+	delete clone.updatedAt;
+	return clone;
+}
+
+function toStableComparableValue(value) {
+	if (Array.isArray(value)) {
+		return value.map((item) => toStableComparableValue(item));
+	}
+	if (value && typeof value === 'object') {
+		const sorted = {};
+		for (const key of Object.keys(value).sort()) {
+			sorted[key] = toStableComparableValue(value[key]);
+		}
+		return sorted;
+	}
+	return value;
+}
+
+function areCharacterCacheValuesEqual(key, left, right) {
+	const normalizedLeft = normalizeCharacterCacheValueForCompare(key, left);
+	const normalizedRight = normalizeCharacterCacheValueForCompare(key, right);
+	return JSON.stringify(toStableComparableValue(normalizedLeft))
+		=== JSON.stringify(toStableComparableValue(normalizedRight));
+}
+
 async function cacheSetCharacterData(key, value) {
 	try {
+		const existing = await characterDataStore.get(key);
+		if (areCharacterCacheValuesEqual(key, existing, value)) {
+			return false;
+		}
 		const ttl = key === LAST_BACKGROUND_REFRESH_KEY ? null : CHARACTER_DATA_TTL_MS;
 		await characterDataStore.set(key, value, ttl);
-		window.dispatchEvent(new CustomEvent(CHARACTER_DATA_UPDATED_EVENT, { detail: { key } }));
+		if (key !== LAST_BACKGROUND_REFRESH_KEY) {
+			window.dispatchEvent(new CustomEvent(CHARACTER_DATA_UPDATED_EVENT, { detail: { key } }));
+		}
+		return true;
 	} catch (_) {
 		// Ignore cache write failures.
+		return false;
 	}
 }
 
