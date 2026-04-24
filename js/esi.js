@@ -3,7 +3,7 @@ window.esi = null;
 const APP_NAME = 'SkillQ (skillq.net - Squizz Caphinator)';
 const localhost = window.location.hostname === 'localhost';
 const ssoLocalClientId = 'a4a7c16cc97440afb765f8fee441ef5a';
-const ssoPublicClientId = 'd614c2c75a9e4e509219f2c10f546fc3';
+const ssoPublicClientId = '2b1049c33ff24b2ba403475e216bb38d';
 
 if (window.location.hostname === '127.0.0.1') {
 	window.location = 'http://localhost:' + window.location.port + window.location.pathname + window.location.search + window.location.hash;

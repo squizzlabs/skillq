@@ -23,13 +23,34 @@ function _el(tag, className, text) {
 	return el;
 }
 
-function _img(src, alt, className) {
+function _img(src, alt, className, attrs = {}) {
 	const img = document.createElement('img');
 	img.src = src;
 	img.alt = alt || '';
 	if (className) img.className = className;
+	for (const [key, value] of Object.entries(attrs)) {
+		img.setAttribute(key, value);
+	}
 	return img;
 }
+
+const eager_img = {
+	loading: 'eager',
+	decoding: 'async',
+	fetchpriority: 'high',
+};
+
+const img_128 = {
+	...eager_img,
+	height: 128,
+	width: 128
+};
+
+const img_256 = {
+	...eager_img,
+	height: 256,
+	width: 256
+};
 
 function _a(href, text, className) {
 	const a = document.createElement('a');
@@ -162,7 +183,7 @@ function renderCharCard({ character, training = null } = {}) {
 	portraitLink.appendChild(_img(
 		`https://images.evetech.net/characters/${character_id}/portrait?size=128`,
 		name,
-		'sq-char-card__portrait'
+		'sq-char-card__portrait',
 	));
 	card.appendChild(portraitLink);
 
@@ -217,23 +238,27 @@ function renderCharInfo({ character, corporation = null, alliance = null, traini
 	el.appendChild(_img(
 		`https://images.evetech.net/characters/${character_id}/portrait?size=256`,
 		name,
-		'sq-char-info__portrait'
+		'sq-char-info__portrait',
+		img_256
 	));
 
+	const size = { height: 128, width: 128 };
 	// Corp / alliance logos
 	const logos = _el('div', 'sq-char-info__logos');
 	if (corporation_id) {
 		logos.appendChild(_img(
 			`https://images.evetech.net/corporations/${corporation_id}/logo?size=128`,
 			corporation?.name || '',
-			'sq-char-info__logo'
+			'sq-char-info__logo',
+			img_128
 		));
 	}
 	if (alliance_id) {
 		logos.appendChild(_img(
 			`https://images.evetech.net/alliances/${alliance_id}/logo?size=128`,
 			alliance?.name || '',
-			'sq-char-info__logo'
+			'sq-char-info__logo',
+			img_128
 		));
 	}
 	el.appendChild(logos);
@@ -314,7 +339,7 @@ function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP 
 	if (queue.length > 0) {
 		const section = _el('section', 'sq-queue');
 		const h4 = _el('h4', 'sq-section-title');
-		h4.innerHTML = `Skill Queue <small>(${queue.length} in queue)</small>`;
+		h4.innerHTML = `Skill Queue <small>(${queue.length} in queue. All times UTC)</small>`;
 		section.appendChild(h4);
 
 		const table = document.createElement('table');
@@ -382,7 +407,7 @@ function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP 
 		// Expand/Collapse controls
 		const controls = _el('div', 'sq-skill-controls');
 		const addCtrl = (label, fn) => {
-			const btn = _el('button', 'sq-btn sq-btn--sm', label);
+			const btn = _el('button', 'sq-btn sq-btn--info sq-btn--sm', label);
 			btn.addEventListener('click', fn);
 			controls.appendChild(btn);
 		};
@@ -577,7 +602,7 @@ function renderCharTrain({ implants = [], suggestions = [] } = {}) {
 	// Filter controls
 	const controls = _el('div', 'sq-skill-controls');
 	const addCtrl = (label, fn) => {
-		const btn = _el('button', 'sq-btn sq-btn--sm', label);
+		const btn = _el('button', 'sq-btn sq-btn--info sq-btn--sm', label);
 		btn.addEventListener('click', fn);
 		controls.appendChild(btn);
 	};
@@ -626,7 +651,7 @@ function renderSharedCharSkills({ queue = [], skills = [], totalSP = 0 } = {}) {
 	if (queue.length > 0) {
 		const trainingSection = _el('section', 'sq-queue');
 		const trainingHeader = _el('h4', 'sq-section-title');
-		trainingHeader.innerHTML = `Skill Queue <small>(${queue.length} in queue)</small>`;
+		trainingHeader.innerHTML = `Skill Queue <small>(${queue.length} in queue. All times UTC)</small>`;
 		trainingSection.appendChild(trainingHeader);
 
 		const trainingTable = document.createElement('table');
@@ -693,7 +718,7 @@ function renderSharedCharSkills({ queue = [], skills = [], totalSP = 0 } = {}) {
 
 	const controls = _el('div', 'sq-skill-controls');
 	const addCtrl = (label, fn) => {
-		const btn = _el('button', 'sq-btn sq-btn--sm', label);
+		const btn = _el('button', 'sq-btn sql-btn--info sq-btn--sm', label);
 		btn.addEventListener('click', fn);
 		controls.appendChild(btn);
 	};

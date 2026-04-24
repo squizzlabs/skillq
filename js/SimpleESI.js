@@ -154,14 +154,6 @@ class SimpleESI {
 	async authCallback() {
 		try {
 			await this.ready;
-			let previousWhoami = null;
-			try {
-				const previousWhoamiRaw = await this.store.get('simpleesi-global-whoami');
-				if (previousWhoamiRaw) previousWhoami = JSON.parse(previousWhoamiRaw);
-			} catch (_) {
-				previousWhoami = null;
-			}
-
 			const params = Object.fromEntries(new URLSearchParams(window.location.search));
 			const expectedState = await this.store.get('simpleesi-global-state');
 			if (decodeURIComponent(params.state) !== expectedState) {
@@ -201,16 +193,6 @@ class SimpleESI {
 			await this.store.delete('simpleesi-global-state');
 			await this.store.delete('simpleesi-global-code_verifier');
 			await this.store.delete('simpleesi-global-code_challenge');
-
-			// If this was an "Add Character" flow, keep the previously active character selected.
-			if (
-				previousWhoami &&
-				previousWhoami.character_id &&
-				String(previousWhoami.character_id) !== String(this.whoami.character_id)
-			) {
-				this.whoami = previousWhoami;
-				await this.store.set('simpleesi-global-whoami', JSON.stringify(previousWhoami));
-			}
 
 			window.location = '/';
 		} catch (err) {
@@ -532,7 +514,7 @@ class SimpleESI {
 		if (await this.lsGet('access_token', character_id) === 'undefined') await this.lsDel('access_token', character_id);
 		let access_token_expires = parseInt(await this.lsGet('access_token_expires', character_id) || '0');
 		if (access_token_expires < Date.now() || await this.lsGet('access_token', character_id) === null) {
-			let authed_json = await this.lsGet('authed_json', character_id);
+			let authed_json = await this.lsGet('authed_json');
 			if (authed_json === null) return this.authLogout();
 			const body = {
 				grant_type: 'refresh_token',

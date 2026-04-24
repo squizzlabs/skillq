@@ -88,6 +88,7 @@ function initSpaNavigation() {
 		if (!isSpaPath(url.pathname)) return;
 
 		event.preventDefault();
+		if (url.pathname === window.location.pathname) return;
 		void navigateTo(url.pathname + url.search + url.hash);
 	});
 
@@ -685,7 +686,7 @@ async function renderSharedCharacterPage() {
 			encodedSnapshotUnix
 		);
 		if (expectedSignature !== providedSignature) {
-			throw new Error('This shared link no longer matches the character\'s current corporation signature.');
+			throw new Error('Sorry, that share link is invalid.');
 		}
 
 		const decodedRecords = SkillUrlCodecSafe.decode(encodedSkills);
@@ -715,7 +716,7 @@ async function renderSharedCharacterPage() {
 		const notice = document.createElement('div');
 		notice.className = 'sq-alert';
 		const snapshotText = snapshotUnix > 0
-			? `Snapshot taken at ${formatDateTime(snapshotUnix * 1000)}. `
+			? `Snapshot taken at ${formatDateTime(snapshotUnix * 1000)} UTC. `
 			: '';
 		notice.innerHTML = `<ul><li>${snapshotText}</li><li>This link will automatically invalidate if the character changes corporations.</li>`;
 		page.appendChild(notice);
@@ -1048,7 +1049,7 @@ function buildCharacterTabContent(data, activeTab) {
 	}
 	const note = document.createElement('p');
 	note.className = 'sq-muted sq-char-note';
-	note.textContent = 'ESI may return stale data until this specific character has logged into EVE recently.';
+	note.textContent = 'ESI may return stale data until this specific character has logged into EVE.';
 	content.appendChild(note);
 	return content;
 }
@@ -1141,7 +1142,7 @@ async function renderManagePage() {
 		actionCell.className = 'sq-text-right';
 		const removeBtn = document.createElement('button');
 		removeBtn.type = 'button';
-		removeBtn.className = 'sq-btn sq-btn--sm';
+		removeBtn.className = 'sq-btn sq-btn--danger sq-btn--sm';
 		removeBtn.textContent = 'Remove';
 		removeBtn.dataset.characterId = charId;
 		removeBtn.dataset.characterName = char.name;
@@ -1687,8 +1688,8 @@ function _createItemRequirementsSection(requirements) {
 	for (const requirement of requirements) {
 		list.appendChild(_createItemSkillRow({
 			typeID: requirement.typeID,
-			typeName: requirement.typeName,
-			metaText: `Level ${Math.max(1, Number(requirement.requiredSkillLevel || 0))}`,
+			typeName: requirement.typeName + ' ' + toRomanNumeral(requirement.requiredSkillLevel),
+			//metaText: `-`,
 			depth: requirement.depth || 0
 		}));
 	}
@@ -2002,6 +2003,10 @@ async function loadCharacterPageDataFromCache(characterId, tab) {
 	let latestUpdatedAt = Number(data.updatedAt || 0);
 
 	if (tab === 'wallet') {
+		if (Number(data?.training?.trainingEndMs || 0) > 0 && Number(data.training.trainingEndMs) <= Date.now()) {
+			const overviewCached = await cacheGetCharacterData(`overview:${characterId}`);
+			applyOverviewTrainingToCommonData(data, overviewCached?.queue || []);
+		}
 		const walletCached = await cacheGetCharacterData(`wallet:${characterId}`);
 		data.wallet = walletCached?.rows || [];
 		latestUpdatedAt = Math.max(latestUpdatedAt, Number(walletCached?.updatedAt || 0));
@@ -2010,6 +2015,10 @@ async function loadCharacterPageDataFromCache(characterId, tab) {
 	}
 
 	if (tab === 'train') {
+		if (Number(data?.training?.trainingEndMs || 0) > 0 && Number(data.training.trainingEndMs) <= Date.now()) {
+			const overviewCached = await cacheGetCharacterData(`overview:${characterId}`);
+			applyOverviewTrainingToCommonData(data, overviewCached?.queue || []);
+		}
 		const trainData = (await cacheGetCharacterData(`train:${characterId}`)) || { implants: [], suggestions: [], updatedAt: 0 };
 		data.implants = trainData.implants;
 		data.suggestions = trainData.suggestions;
@@ -2031,6 +2040,7 @@ async function loadCharacterPageDataFromCache(characterId, tab) {
 			data.training.level = queuedLevel;
 		}
 	}
+	applyOverviewTrainingToCommonData(data, skillsData.queue || []);
 	data.queue = skillsData.queue;
 	data.skills = skillsData.skills;
 	data.totalSP = skillsData.totalSP;
@@ -2051,7 +2061,8 @@ async function refreshCharacterSummaryInBackground(characterId, characterName) {
 	const cachedSummary = await cacheGetCharacterData(summaryKey);
 	const missingTrainingLevel = Boolean(cachedSummary?.training?.typeName)
 		&& !Number(cachedSummary?.training?.level || 0);
-	if (!(await shouldRefreshCharacterData(summaryKey)) && !missingTrainingLevel) {
+	const finishedTraining = hasTrainingCompleted(cachedSummary?.training);
+	if (!(await shouldRefreshCharacterData(summaryKey)) && !missingTrainingLevel && !finishedTraining) {
 		return;
 	}
 
@@ -2064,15 +2075,17 @@ async function refreshCharacterSummaryInBackground(characterId, characterName) {
 
 		let training = null;
 		if (Array.isArray(queue) && queue.length > 0) {
-			const active = queue[0];
-			const queueLast = queue[queue.length - 1];
-			const typeInfo = await getTypeInfo(active?.skill_id);
-			training = {
-				typeName: typeInfo?.name || null,
-				level: Number(active?.finished_level || 0),
-				trainingEndMs: active?.finish_date ? Date.parse(active.finish_date) : 0,
-				queueEmptyMs: queueLast?.finish_date ? Date.parse(queueLast.finish_date) : 0
-			};
+			const active = pickCurrentOrNextQueueRow(queue);
+			if (active) {
+				const queueEmptyMs = Math.max(0, ...queue.map((row) => (row?.finish_date ? (Date.parse(row.finish_date) || 0) : 0)));
+				const typeInfo = await getTypeInfo(active?.skill_id);
+				training = {
+					typeName: typeInfo?.name || null,
+					level: Number(active?.finished_level || 0),
+					trainingEndMs: active?.finish_date ? Date.parse(active.finish_date) : 0,
+					queueEmptyMs
+				};
+			}
 		}
 
 		await cacheSetCharacterData(`summary:${characterId}`, {
@@ -2084,7 +2097,7 @@ async function refreshCharacterSummaryInBackground(characterId, characterName) {
 			},
 			training,
 			updatedAt: Date.now()
-		});
+		}) || await cacheTouchCharacterData(`summary:${characterId}`);
 	} catch (err) {
 		console.warn(`Background summary refresh failed for ${characterId}`, err);
 	}
@@ -2095,24 +2108,26 @@ async function refreshCharacterPageInBackground(characterId, tab) {
 	const cachedCommon = await cacheGetCharacterData(commonKey);
 	const missingTrainingLevel = Boolean(cachedCommon?.training?.typeName)
 		&& !Number(cachedCommon?.training?.level || 0);
-	if (!(await shouldRefreshCharacterData(commonKey)) && !missingTrainingLevel) {
+	const finishedTraining = hasTrainingCompleted(cachedCommon?.training);
+	if (!(await shouldRefreshCharacterData(commonKey)) && !missingTrainingLevel && !finishedTraining) {
 		if (tab === 'wallet' && !(await shouldRefreshCharacterData(`wallet:${characterId}`))) return;
 		if (tab === 'train' && !(await shouldRefreshCharacterData(`train:${characterId}`))) return;
 		if (tab === 'overview' && !(await shouldRefreshCharacterData(`overview:${characterId}`))) return;
 	}
 
 	try {
-		if (missingTrainingLevel || (await shouldRefreshCharacterData(commonKey))) {
+		if (missingTrainingLevel || finishedTraining || (await shouldRefreshCharacterData(commonKey))) {
 			const common = await fetchCharacterCommonData(characterId);
 			common.message = null;
 			common.updatedAt = Date.now();
-			await cacheSetCharacterData(commonKey, common);
+			await cacheSetCharacterData(commonKey, common) || await cacheTouchCharacterData(commonKey);
 		}
 
 		if (tab === 'wallet') {
 			if (!(await shouldRefreshCharacterData(`wallet:${characterId}`))) return;
 			const wallet = await fetchWalletRows(characterId);
-			await cacheSetCharacterData(`wallet:${characterId}`, { rows: wallet, updatedAt: Date.now() });
+			await cacheSetCharacterData(`wallet:${characterId}`, { rows: wallet, updatedAt: Date.now() })
+				|| await cacheTouchCharacterData(`wallet:${characterId}`);
 			return;
 		}
 
@@ -2120,14 +2135,16 @@ async function refreshCharacterPageInBackground(characterId, tab) {
 			if (!(await shouldRefreshCharacterData(`train:${characterId}`))) return;
 			const train = await fetchTrainingSuggestions(characterId);
 			train.updatedAt = Date.now();
-			await cacheSetCharacterData(`train:${characterId}`, train);
+			await cacheSetCharacterData(`train:${characterId}`, train)
+				|| await cacheTouchCharacterData(`train:${characterId}`);
 			return;
 		}
 
 		if (!(await shouldRefreshCharacterData(`overview:${characterId}`))) return;
 		const overview = await fetchSkillsOverview(characterId);
 		overview.updatedAt = Date.now();
-		await cacheSetCharacterData(`overview:${characterId}`, overview);
+		await cacheSetCharacterData(`overview:${characterId}`, overview)
+			|| await cacheTouchCharacterData(`overview:${characterId}`);
 	} catch (err) {
 		console.warn(`Background page refresh failed for ${characterId}`, err);
 	}
@@ -2287,15 +2304,17 @@ async function fetchCharacterCommonData(characterId) {
 
 	let training = null;
 	if (Array.isArray(queue) && queue.length > 0) {
-		const active = queue[0];
-		const queueLast = queue[queue.length - 1];
-		const typeInfo = await getTypeInfo(active.skill_id);
-		training = {
-			typeName: typeInfo?.name || `Skill ${active.skill_id}`,
-			level: Number(active.finished_level || 0),
-			trainingEndMs: active.finish_date ? Date.parse(active.finish_date) : 0,
-			queueEmptyMs: queueLast.finish_date ? Date.parse(queueLast.finish_date) : 0
-		};
+		const active = pickCurrentOrNextQueueRow(queue);
+		if (active) {
+			const queueEmptyMs = Math.max(0, ...queue.map((row) => (row?.finish_date ? (Date.parse(row.finish_date) || 0) : 0)));
+			const typeInfo = await getTypeInfo(active.skill_id);
+			training = {
+				typeName: typeInfo?.name || `Skill ${active.skill_id}`,
+				level: Number(active.finished_level || 0),
+				trainingEndMs: active.finish_date ? Date.parse(active.finish_date) : 0,
+				queueEmptyMs
+			};
+		}
 	}
 
 	return {
@@ -2341,7 +2360,7 @@ async function fetchSkillsOverview(characterId) {
 	});
 
 	const maxQueuedLevels = new Map();
-	const activeQueueRow = queue[0] || null;
+	const activeQueueRow = pickCurrentOrNextQueueRow(queue);
 	const activeTrainingSkillId = Number(activeQueueRow?.skill_id || 0);
 	const activeTrainingStartMs = activeQueueRow?.start_date ? Date.parse(activeQueueRow.start_date) : 0;
 	const activeTrainingEndMs = activeQueueRow?.finish_date ? Date.parse(activeQueueRow.finish_date) : 0;
@@ -2375,6 +2394,71 @@ async function fetchSkillsOverview(characterId) {
 		skills: skillRows,
 		totalSP: Number(skillsResponse?.total_sp || 0),
 		unallocatedSP: Number(skillsResponse?.unallocated_sp || 0)
+	};
+}
+
+function pickCurrentOrNextQueueRow(queueRows) {
+	const now = Date.now();
+	const rows = Array.isArray(queueRows) ? queueRows : [];
+	const active = rows.find((row) => {
+		const startMs = row?.start_date ? Date.parse(row.start_date) : 0;
+		const endMs = row?.finish_date ? Date.parse(row.finish_date) : 0;
+		return startMs > 0 && endMs > now && startMs <= now;
+	});
+	if (active) return active;
+	return rows
+		.filter((row) => {
+			const endMs = row?.finish_date ? Date.parse(row.finish_date) : 0;
+			return endMs > now;
+		})
+		.sort((left, right) => {
+			const leftStart = left?.start_date ? (Date.parse(left.start_date) || 0) : 0;
+			const rightStart = right?.start_date ? (Date.parse(right.start_date) || 0) : 0;
+			if (leftStart !== rightStart) return leftStart - rightStart;
+			const leftEnd = left?.finish_date ? (Date.parse(left.finish_date) || 0) : 0;
+			const rightEnd = right?.finish_date ? (Date.parse(right.finish_date) || 0) : 0;
+			return leftEnd - rightEnd;
+		})[0] || null;
+}
+
+function pickCurrentOrNextOverviewQueueEntry(queueRows) {
+	const now = Date.now();
+	const rows = Array.isArray(queueRows) ? queueRows : [];
+	const active = rows.find((row) => {
+		const startMs = row?.startDate ? Date.parse(row.startDate) : 0;
+		const endMs = row?.endDate ? Date.parse(row.endDate) : 0;
+		return startMs > 0 && endMs > now && startMs <= now;
+	});
+	if (active) return active;
+	return rows
+		.filter((row) => {
+			const endMs = row?.endDate ? Date.parse(row.endDate) : 0;
+			return endMs > now;
+		})
+		.sort((left, right) => {
+			const leftStart = left?.startDate ? (Date.parse(left.startDate) || 0) : 0;
+			const rightStart = right?.startDate ? (Date.parse(right.startDate) || 0) : 0;
+			if (leftStart !== rightStart) return leftStart - rightStart;
+			const leftEnd = left?.endDate ? (Date.parse(left.endDate) || 0) : 0;
+			const rightEnd = right?.endDate ? (Date.parse(right.endDate) || 0) : 0;
+			return leftEnd - rightEnd;
+		})[0] || null;
+}
+
+function hasTrainingCompleted(training) {
+	const endMs = Number(training?.trainingEndMs || 0);
+	return endMs > 0 && endMs <= Date.now();
+}
+
+function applyOverviewTrainingToCommonData(data, queueRows) {
+	const nextEntry = pickCurrentOrNextOverviewQueueEntry(queueRows || []);
+	if (!nextEntry) return;
+	const queueEmptyMs = Math.max(0, ...(queueRows || []).map((row) => (row?.endDate ? (Date.parse(row.endDate) || 0) : 0)));
+	data.training = {
+		typeName: nextEntry.typeName || '',
+		level: Number(nextEntry.level || 0),
+		trainingEndMs: nextEntry.endDate ? Date.parse(nextEntry.endDate) : 0,
+		queueEmptyMs
 	};
 }
 
@@ -2676,6 +2760,23 @@ async function cacheSetCharacterData(key, value) {
 		return true;
 	} catch (_) {
 		// Ignore cache write failures.
+		return false;
+	}
+}
+
+async function cacheTouchCharacterData(key) {
+	try {
+		const existing = await characterDataStore.get(key);
+		if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
+			return false;
+		}
+		const ttl = key === LAST_BACKGROUND_REFRESH_KEY ? null : CHARACTER_DATA_TTL_MS;
+		await characterDataStore.set(key, {
+			...existing,
+			updatedAt: Date.now()
+		}, ttl);
+		return true;
+	} catch (_) {
 		return false;
 	}
 }

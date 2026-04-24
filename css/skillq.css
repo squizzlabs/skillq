@@ -270,7 +270,9 @@ a:hover { color: var(--link-hover); text-decoration: underline; }
 :root {
 --accent: #0088cc;
 --accent-hover: #005580;
---warn: #e67e22;
+--warn: #f59e0b;
+--danger: #e74c3c;
+--info: #3498db;
 --pip-empty: #cccccc;
 --pip-trained: #0088cc;
 --pip-training: #f59e0b;
@@ -319,6 +321,10 @@ text-decoration: none;
 .sq-btn--primary:hover { background: var(--accent-hover); }
 .sq-btn--ghost  { background: transparent; border-color: transparent; color: var(--nav-fg); }
 .sq-btn--ghost:hover { background: rgba(255,255,255,0.1); }
+.sq-btn--info { background: var(--info); color: #fff; border-color: var(--info); }
+.sq-btn--info:hover { background: darken(var(--info), 10%); }
+.sq-btn--danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+.sq-btn--danger:hover { background: darken(var(--danger), 10%); }
 .sq-btn--sm { padding: 0.2rem 0.5rem; font-size: 0.8rem; }
 
 /* ── Tables ── */

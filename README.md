@@ -8,6 +8,6 @@ SkillQ allows you to monitor your skills in a single place using any browser..
 
 Here are some example screenshots:
 
-![Screenshot1](https://skillq.net/img/skillq_01.png)
+![Dashboard](https://skillq.net/img/skillq_dash.png)
 
-![Screenshot2](https://skillq.net/img/skillq_02.png)
+![Character Page](https://skillq.net/img/skillq_example.png)
