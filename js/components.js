@@ -779,7 +779,7 @@ function renderSharedCharSkills({ queue = [], skills = [], totalSP = 0 } = {}) {
 		section.appendChild(groupEl);
 	}
 
-	const note = _el('p', 'sq-muted', 'Shared links include skill levels and active training timing, not wallet data or exact accumulated SP.');
+	const note = _el('p', 'sq-muted', 'Shared links include skill levels and active training timing, not wallet transactions or exact accumulated SP.');
 	section.appendChild(note);
 	el.appendChild(section);
 	return el;
