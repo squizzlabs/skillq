@@ -138,7 +138,7 @@ function renderNavbar({ characters = [], currentCharId = null, isLoggedIn = fals
 		layoutItem.appendChild(layoutToggle);
 		menu.appendChild(layoutItem);
 
-		for (const [label, href] of [['Manage', '/manage'], ['Settings', '/settings'], ['Logout', '/logout']]) {
+		for (const [label, href] of [['Manage', '/manage'], ['Settings', '/settings'], ['About', '/readme'], ['Logout', '/logout']]) {
 			const li = document.createElement('li');
 			li.appendChild(_a(href, label, 'sq-dropdown__item'));
 			menu.appendChild(li);

@@ -18,6 +18,11 @@ let cacheAutoRenderInitialized = false;
 let routeRerenderScheduled = false;
 const LAST_BACKGROUND_REFRESH_KEY = '__meta:last-background-refresh';
 const CHARACTER_DATA_UPDATED_EVENT = 'skillq:character-data-updated';
+const CHARACTER_DATA_SYNC_CHANNEL_NAME = 'skillq:character-data-sync';
+const CHARACTER_DATA_SYNC_TAB_ID = `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const characterDataSyncChannel = typeof BroadcastChannel !== 'undefined'
+	? new BroadcastChannel(CHARACTER_DATA_SYNC_CHANNEL_NAME)
+	: null;
 const LAYOUT_MODE_KEY = '__ui:layout-mode';
 const THEME_MODE_KEY = '__ui:theme-mode';
 const MANAGE_SETTINGS_KEY = '__ui:manage-settings';
@@ -52,9 +57,9 @@ async function main() {
 		await initLayoutMode();
 		initCacheAutoRender();
 		initBackgroundCharacterRefresh();
-		await primeCharacterCachesOnStartup();
 		initSpaNavigation();
 		await handleRoute();
+		void primeCharacterCachesOnStartup();
 	} catch (err) {
 		console.error('Error in main():', err);
 		document.getElementById('about').innerHTML = '<p>Error during initialization. <a href="/login">Click here to login</a>.</p>';
@@ -111,7 +116,17 @@ async function handleRoute() {
 		return;
 	}
 
-	if (path === '/login' || path === '/login-check') {
+	if (path === '/login-check') {
+		if (window.esi.whoami !== null) {
+			history.replaceState(null, '', '/');
+			await renderLoggedInHome();
+			return;
+		}
+		await window.esi.authBegin();
+		return;
+	}
+
+	if (path === '/login') {
 		await window.esi.authBegin();
 		return;
 	}
@@ -135,15 +150,16 @@ async function handleRoute() {
 		return;
 	}
 
+	if (route.name === 'readme') {
+		await renderReadmePage();
+		return;
+	}
+
 	if (window.esi.whoami === null) {
 		if (path !== '/readme' && path !== '/readme/') {
 			history.replaceState(null, '', '/readme');
 		}
-		await loadReadme();
-		document.getElementById('about').classList.remove('d-none');
-		document.getElementById('skillq').classList.add('d-none');
-		renderNavbarInto(document.getElementById('navbar-root'), { isLoggedIn: false, layoutMode });
-		bindLayoutToggle();
+		await renderReadmePage();
 		return;
 	}
 
@@ -222,8 +238,12 @@ function renderNavbarInto(root, options) {
 function canPatchNavbar(nav, { characters = [], isLoggedIn = false } = {}) {
 	const hasAllLink = Boolean(nav.querySelector('.sq-nav__all-link'));
 	const hasLoginButton = Boolean(nav.querySelector('.sq-btn--primary'));
+	const hasDropdownAboutLink = Boolean(nav.querySelector('.sq-dropdown__menu a[href="/readme"]'));
+	const hasLoggedOutAboutLink = Boolean(nav.querySelector('.sq-nav__actions > a[href="/readme"]'));
 	if (isLoggedIn !== hasAllLink) return false;
 	if (!isLoggedIn && !hasLoginButton) return false;
+	if (isLoggedIn && !hasDropdownAboutLink) return false;
+	if (!isLoggedIn && !hasLoggedOutAboutLink) return false;
 
 	const charLinks = Array.from(nav.querySelectorAll('.sq-nav__char-link'));
 	if (charLinks.length !== characters.length) return false;
@@ -434,6 +454,13 @@ async function renderCurrentNavbarForUtilityPage() {
 		renderNavbarInto(navbarRoot, { isLoggedIn: false, layoutMode });
 	}
 	bindLayoutToggle();
+}
+
+async function renderReadmePage() {
+	await renderCurrentNavbarForUtilityPage();
+	await loadReadme();
+	document.getElementById('about').classList.remove('d-none');
+	document.getElementById('skillq').classList.add('d-none');
 }
 
 function findCurrentCorporationHistoryEntry(historyRows, corporationId) {
@@ -2210,6 +2237,20 @@ function initCacheAutoRender() {
 	window.addEventListener(CHARACTER_DATA_UPDATED_EVENT, () => {
 		scheduleRouteRerender();
 	});
+
+	if (characterDataSyncChannel) {
+		characterDataSyncChannel.addEventListener('message', (event) => {
+			const message = event.data || {};
+			if (message.type !== CHARACTER_DATA_UPDATED_EVENT) return;
+			if (message.fromTabId === CHARACTER_DATA_SYNC_TAB_ID) return;
+			window.dispatchEvent(new CustomEvent(CHARACTER_DATA_UPDATED_EVENT, {
+				detail: {
+					key: message.key,
+					remote: true
+				}
+			}));
+		});
+	}
 }
 
 function scheduleRouteRerender() {
@@ -2756,6 +2797,11 @@ async function cacheSetCharacterData(key, value) {
 		await characterDataStore.set(key, value, ttl);
 		if (key !== LAST_BACKGROUND_REFRESH_KEY) {
 			window.dispatchEvent(new CustomEvent(CHARACTER_DATA_UPDATED_EVENT, { detail: { key } }));
+			characterDataSyncChannel?.postMessage({
+				type: CHARACTER_DATA_UPDATED_EVENT,
+				key,
+				fromTabId: CHARACTER_DATA_SYNC_TAB_ID
+			});
 		}
 		return true;
 	} catch (_) {
