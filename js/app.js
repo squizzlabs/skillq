@@ -394,7 +394,7 @@ async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 		.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue/?datasource=tranquility`, 'GET', null, null, characterId)
 		.catch(() => []);
 	const queue = (Array.isArray(queueResponse) ? queueResponse : [])
-		.slice()
+		.slice(0, 25)
 		.sort((a, b) => Number(a?.queue_position || 0) - Number(b?.queue_position || 0));
 
 	// Encode each trained skill as a base record (current level, no timing)
@@ -929,7 +929,7 @@ async function renderSharedCharacterPage() {
 		const snapshotText = snapshotUnix > 0
 			? `Snapshot taken at ${formatDateTime(snapshotUnix * 1000)} UTC. `
 			: '';
-		notice.innerHTML = `<ul><li>${snapshotText}</li><li>This link will automatically invalidate if the character changes corporations.</li>`;
+		notice.innerHTML = `<ul><li>${snapshotText}</li><li>Only first 25 skills in skill queue are shown.</li><li>This link will automatically invalidate if the character changes corporations.</li></ul>`;
 		page.appendChild(notice);
 
 		page.appendChild(renderSharedCharSkills({ queue: sharedData.queue, skills: sharedData.skills, totalSP: sharedTotalSP }));
