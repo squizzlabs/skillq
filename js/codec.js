@@ -17,16 +17,16 @@
  * - Safe for missing optional fields
  * - More compact than plain JSON
  *
- * Encoding format, version 3:
+ * Encoding format, version 2:
  *
  * Header:
  * - version: varuint
  * - record count: varuint
  *
  * Per record:
- * - type_id:
- *   - first record: full unsigned varint
- *   - later records: delta from previous type_id as unsigned varint
+ * - type_id_delta: signed varint (zig-zag encoded)
+ *   - first record: type_id - 0
+ *   - later records: type_id - previous type_id
  * - flags: 1 byte
  *   - bits 0-2: level (0-7, we only allow 0-5)
  *   - bit 3: training_start present
@@ -35,8 +35,8 @@
  * - training_end: unsigned varint, only if present
  *
  * Notes:
- * - Records are sorted by type_id during encoding to improve compression.
- * - Decoded records are returned in type_id order.
+ * - Record input order is preserved.
+ * - Decoder supports legacy version 1 payloads for backward compatibility.
  * - This implementation supports both browser and Node.js environments.
  */
 const SkillUrlCodecSafe = (() => {
@@ -44,7 +44,7 @@ const SkillUrlCodecSafe = (() => {
 	 * Binary format version.
 	 * Bump this if the encoding layout changes in the future.
 	 */
-	const VERSION = 1;
+	const VERSION = 2;
 
 	/**
 	 * Validates that a value is a JavaScript safe integer.
@@ -124,6 +124,48 @@ const SkillUrlCodecSafe = (() => {
 		}
 
 		return result;
+	}
+
+	/**
+	 * Zig-zag encodes a signed integer into an unsigned integer.
+	 *
+	 * @param {number} value - Signed integer.
+	 * @returns {number} Unsigned zig-zag encoded integer.
+	 */
+	function encodeZigZag(value) {
+		return value >= 0 ? value * 2 : (-value * 2) - 1;
+	}
+
+	/**
+	 * Zig-zag decodes an unsigned integer back into a signed integer.
+	 *
+	 * @param {number} value - Unsigned zig-zag encoded integer.
+	 * @returns {number} Signed integer.
+	 */
+	function decodeZigZag(value) {
+		return (value % 2 === 0) ? (value / 2) : -((value + 1) / 2);
+	}
+
+	/**
+	 * Writes a signed variable-length integer to the output byte array.
+	 *
+	 * @param {number[]} out - Output byte array.
+	 * @param {number} value - Signed integer to write.
+	 */
+	function writeVarInt(out, value) {
+		assertSafeInt(value, "varint");
+		writeVarUint(out, encodeZigZag(value));
+	}
+
+	/**
+	 * Reads a signed variable-length integer from a byte array.
+	 *
+	 * @param {Uint8Array} bytes - Source bytes.
+	 * @param {{offset:number}} state - Mutable read state.
+	 * @returns {number} Decoded signed integer.
+	 */
+	function readVarInt(bytes, state) {
+		return decodeZigZag(readVarUint(bytes, state));
 	}
 
 	/**
@@ -251,13 +293,9 @@ const SkillUrlCodecSafe = (() => {
 	 *
 	 * Behavior:
 	 * - Validates all records
-	 * - Sorts records by type_id to improve delta compression
+	 * - Preserves input record order
 	 * - Writes the binary format described at the top of this file
 	 * - Returns base64url text safe for use in URLs
-	 *
-	 * Important:
-	 * - Because records are sorted during encoding, decoded output will also
-	 *   be sorted by type_id rather than original input order.
 	 *
 	 * @param {Array<{
 	 *   type_id:number,
@@ -275,8 +313,6 @@ const SkillUrlCodecSafe = (() => {
 
 		const normalized = records.map(normalizeRecord);
 
-		normalized.sort((a, b) => a.type_id - b.type_id);
-
 		const out = [];
 
 		// Write file format version.
@@ -292,14 +328,8 @@ const SkillUrlCodecSafe = (() => {
 			const hasStart = rec.training_start !== undefined;
 			const hasEnd = rec.training_end !== undefined;
 
-			// Write type_id as:
-			// - full value for first record
-			// - delta from previous type_id for later records
-			if (i === 0) {
-				writeVarUint(out, rec.type_id);
-			} else {
-				writeVarUint(out, rec.type_id - prevTypeId);
-			}
+			// Write type_id delta as signed varint to preserve input order.
+			writeVarInt(out, rec.type_id - prevTypeId);
 
 			prevTypeId = rec.type_id;
 
@@ -335,10 +365,6 @@ const SkillUrlCodecSafe = (() => {
 	 * - Rebuilds type_id values using delta decoding
 	 * - Reconstructs optional fields from the flags byte
 	 *
-	 * Output order:
-	 * - Records are returned sorted by type_id because the encoder sorts them
-	 *   before writing.
-	 *
 	 * @param {string} encoded - Base64url string produced by encode().
 	 * @returns {Array<{
 	 *   type_id:number,
@@ -354,10 +380,50 @@ const SkillUrlCodecSafe = (() => {
 
 		// Read and validate version.
 		const version = readVarUint(bytes, state);
-		if (version !== VERSION) {
-			throw new Error(`Unsupported version: ${version}`);
+		if (version === 1) {
+			return decodeV1(bytes, state);
+		}
+		if (version === 2) {
+			return decodeV2(bytes, state);
+		}
+		throw new Error(`Unsupported version: ${version}`);
+	}
+
+	function decodeV1(bytes, state) {
+		const count = readVarUint(bytes, state);
+		const records = [];
+		let prevTypeId = 0;
+
+		for (let i = 0; i < count; i++) {
+			const typeId = i === 0
+				? readVarUint(bytes, state)
+				: prevTypeId + readVarUint(bytes, state);
+
+			prevTypeId = typeId;
+
+			if (state.offset >= bytes.length) {
+				throw new Error("Unexpected end of data while reading flags");
+			}
+
+			const flags = bytes[state.offset++];
+			const level = flags & 0x07;
+			const hasStart = (flags & (1 << 3)) !== 0;
+			const hasEnd = (flags & (1 << 4)) !== 0;
+
+			const rec = { type_id: typeId, level };
+			if (hasStart) rec.training_start = readVarUint(bytes, state);
+			if (hasEnd) rec.training_end = readVarUint(bytes, state);
+			records.push(rec);
 		}
 
+		if (state.offset !== bytes.length) {
+			throw new Error("Extra trailing bytes detected");
+		}
+
+		return records;
+	}
+
+	function decodeV2(bytes, state) {
 		// Read record count.
 		const count = readVarUint(bytes, state);
 		const records = [];
@@ -365,12 +431,8 @@ const SkillUrlCodecSafe = (() => {
 		let prevTypeId = 0;
 
 		for (let i = 0; i < count; i++) {
-			// Read type_id:
-			// - first record is full value
-			// - later records are previous + delta
-			const typeId = i === 0
-				? readVarUint(bytes, state)
-				: prevTypeId + readVarUint(bytes, state);
+			// Read type_id as signed delta from previous.
+			const typeId = prevTypeId + readVarInt(bytes, state);
 
 			prevTypeId = typeId;
 
@@ -399,7 +461,6 @@ const SkillUrlCodecSafe = (() => {
 			records.push(rec);
 		}
 
-		// If unread bytes remain, the payload is malformed or from a different format.
 		if (state.offset !== bytes.length) {
 			throw new Error("Extra trailing bytes detected");
 		}

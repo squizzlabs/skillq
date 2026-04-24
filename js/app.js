@@ -393,7 +393,9 @@ async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 	const queueResponse = await window.esi
 		.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue/?datasource=tranquility`, 'GET', null, null, characterId)
 		.catch(() => []);
-	const queue = Array.isArray(queueResponse) ? queueResponse : [];
+	const queue = (Array.isArray(queueResponse) ? queueResponse : [])
+		.slice()
+		.sort((a, b) => Number(a?.queue_position || 0) - Number(b?.queue_position || 0));
 
 	// Encode each trained skill as a base record (current level, no timing)
 	const trainedRecords = (skills || [])
@@ -403,18 +405,41 @@ async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 			level: Math.max(0, Math.min(5, Number(s.level || 0)))
 		}));
 
-	// Encode each queue row as its own record (one per queue position, with timing)
+	// Encode each queue row as one record with compact timing:
+	// first row keeps absolute start; all rows store end delta to previous queue boundary.
+	let previousQueueEndUnix = 0;
 	const queueRecords = queue
 		.filter((row) => Number(row?.skill_id || 0) > 0)
-		.map((row) => {
+		.map((row, index) => {
 			const record = {
 				type_id: Number(row.skill_id),
 				level: Math.max(0, Math.min(5, Number(row.finished_level || 0)))
 			};
-			const startMs = row.start_date ? Date.parse(row.start_date) : 0;
-			const endMs = row.finish_date ? Date.parse(row.finish_date) : 0;
-			if (startMs > 0) record.training_start = Math.floor(startMs / 1000);
-			if (endMs > 0) record.training_end = Math.floor(endMs / 1000);
+			const startUnix = row.start_date ? Math.floor(Date.parse(row.start_date) / 1000) : 0;
+			const endUnix = row.finish_date ? Math.floor(Date.parse(row.finish_date) / 1000) : 0;
+
+			if (index === 0 && startUnix > 0) {
+				record.training_start = startUnix;
+			}
+
+			if (endUnix > 0) {
+				if (index === 0) {
+					record.training_end = Math.max(0, endUnix - (startUnix > 0 ? startUnix : endUnix));
+				} else if (previousQueueEndUnix > 0 && endUnix >= previousQueueEndUnix) {
+					record.training_end = Math.max(0, endUnix - previousQueueEndUnix);
+				} else {
+					// Fallback keeps queue entries decodable if API timings are incomplete.
+					record.training_end = endUnix;
+				}
+			}
+
+			if (!Object.prototype.hasOwnProperty.call(record, 'training_end')) {
+				record.training_end = 0;
+			}
+
+			if (endUnix > 0) {
+				previousQueueEndUnix = endUnix;
+			}
 			return record;
 		});
 
@@ -634,7 +659,7 @@ async function hydrateSharedSkills(records) {
 	const trainedMap = new Map(); // type_id → max trained level
 	const queueEntryRecords = [];
 	for (const record of records) {
-		const hasTime = Number(record.training_start || 0) > 0 || Number(record.training_end || 0) > 0;
+		const hasTime = Object.prototype.hasOwnProperty.call(record, 'training_start') || Object.prototype.hasOwnProperty.call(record, 'training_end');
 		if (!hasTime) {
 			const existing = trainedMap.get(record.type_id) || 0;
 			trainedMap.set(record.type_id, Math.max(existing, Number(record.level || 0)));
@@ -643,8 +668,10 @@ async function hydrateSharedSkills(records) {
 		}
 	}
 
+	const compactQueueTimes = normalizeSharedQueueTimings(queueEntryRecords);
+
 	// Build queue display entries (one per original queue position, sorted by start time)
-	const queue = queueEntryRecords
+	const queue = compactQueueTimes
 		.map((record) => {
 			const typeInfo = typeInfos.get(record.type_id);
 			const groupInfo = groupInfos.get(typeInfo?.group_id);
@@ -692,6 +719,45 @@ async function hydrateSharedSkills(records) {
 		.sort((a, b) => (a.groupName || '').localeCompare(b.groupName || '') || (a.typeName || '').localeCompare(b.typeName || ''));
 
 	return { queue, skills };
+}
+
+function normalizeSharedQueueTimings(queueEntryRecords) {
+	if (!Array.isArray(queueEntryRecords) || queueEntryRecords.length === 0) {
+		return [];
+	}
+
+	const first = queueEntryRecords[0] || {};
+	const firstStart = Number(first.training_start || 0);
+	const firstEndRaw = Number(first.training_end || 0);
+	const compactFormat = firstStart > 1000000000 && firstEndRaw >= 0 && firstEndRaw < firstStart;
+
+	if (!compactFormat) {
+		return queueEntryRecords;
+	}
+
+	let previousEnd = 0;
+	return queueEntryRecords.map((record, index) => {
+		const deltaEnd = Math.max(0, Number(record.training_end || 0));
+		if (index === 0) {
+			const start = Math.max(0, Number(record.training_start || 0));
+			const end = start + deltaEnd;
+			previousEnd = end;
+			return {
+				...record,
+				training_start: start,
+				training_end: end
+			};
+		}
+
+		const start = previousEnd;
+		const end = start + deltaEnd;
+		previousEnd = end;
+		return {
+			...record,
+			training_start: start,
+			training_end: end
+		};
+	});
 }
 
 function findSharedTrainingSummary(queue) {
