@@ -603,8 +603,20 @@ async function gzipBytes(bytes) {
 	return new Uint8Array(buffer);
 }
 
+async function deflateBytes(bytes) {
+	const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'));
+	const buffer = await new Response(stream).arrayBuffer();
+	return new Uint8Array(buffer);
+}
+
 async function gunzipBytes(bytes) {
 	const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+	const buffer = await new Response(stream).arrayBuffer();
+	return new Uint8Array(buffer);
+}
+
+async function inflateBytes(bytes) {
+	const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
 	const buffer = await new Response(stream).arrayBuffer();
 	return new Uint8Array(buffer);
 }
@@ -616,9 +628,24 @@ async function encodeShareSkillsPayload(records) {
 	}
 
 	try {
-		const compressedBytes = await gzipBytes(new TextEncoder().encode(rawPayload));
-		const compressedPayload = `c1_${bytesToBase64Url(compressedBytes)}`;
-		return compressedPayload.length < rawPayload.length ? compressedPayload : rawPayload;
+		const rawBytes = base64UrlToBytes(rawPayload);
+		const candidates = [rawPayload];
+
+		try {
+			const deflated = await deflateBytes(rawBytes);
+			candidates.push(`c2d_${bytesToBase64Url(deflated)}`);
+		} catch (deflateErr) {
+			console.warn('Deflate compression unavailable for share payload.', deflateErr);
+		}
+
+		try {
+			const gzipped = await gzipBytes(rawBytes);
+			candidates.push(`c2g_${bytesToBase64Url(gzipped)}`);
+		} catch (gzipErr) {
+			console.warn('Gzip compression unavailable for share payload.', gzipErr);
+		}
+
+		return candidates.reduce((shortest, candidate) => (candidate.length < shortest.length ? candidate : shortest), rawPayload);
 	} catch (err) {
 		console.warn('Unable to compress share payload, falling back to legacy format.', err);
 		return rawPayload;
@@ -632,7 +659,9 @@ async function decodeShareSkillsPayload(encodedSkills) {
 	}
 
 	if (!payload.startsWith('c1_')) {
-		return SkillUrlCodecSafe.decode(payload);
+		if (!payload.startsWith('c2d_') && !payload.startsWith('c2g_')) {
+			return SkillUrlCodecSafe.decode(payload);
+		}
 	}
 
 	if (!supportsShareCompressionStreams()) {
@@ -640,10 +669,26 @@ async function decodeShareSkillsPayload(encodedSkills) {
 	}
 
 	try {
-		const compressed = base64UrlToBytes(payload.slice(3));
-		const decompressed = await gunzipBytes(compressed);
-		const rawPayload = new TextDecoder().decode(decompressed);
-		return SkillUrlCodecSafe.decode(rawPayload);
+		if (payload.startsWith('c1_')) {
+			const compressed = base64UrlToBytes(payload.slice(3));
+			const decompressed = await gunzipBytes(compressed);
+			const rawPayload = new TextDecoder().decode(decompressed);
+			return SkillUrlCodecSafe.decode(rawPayload);
+		}
+
+		if (payload.startsWith('c2d_')) {
+			const compressed = base64UrlToBytes(payload.slice(4));
+			const decompressed = await inflateBytes(compressed);
+			return SkillUrlCodecSafe.decode(bytesToBase64Url(decompressed));
+		}
+
+		if (payload.startsWith('c2g_')) {
+			const compressed = base64UrlToBytes(payload.slice(4));
+			const decompressed = await gunzipBytes(compressed);
+			return SkillUrlCodecSafe.decode(bytesToBase64Url(decompressed));
+		}
+
+		return SkillUrlCodecSafe.decode(payload);
 	} catch (err) {
 		throw new Error('This shared link could not be decompressed.');
 	}
