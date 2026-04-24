@@ -123,7 +123,6 @@ class SimpleESI {
 	}
 
 	async domLoaded() {
-		console.log('domLoaded', window.location.pathname);
 		switch (window.location.pathname) {
 			case this.getOption('loginURL', '/login.html'):
 				return this.authBegin();
@@ -387,6 +386,7 @@ class SimpleESI {
 			try {
 				this.inflight++;
 				this.esiInFlightHandler(this.inflight);
+				console.log('Fetching:', method, url);
 				res = await fetch(url, params);
 				if (res.status >= 500) this.esiIssueHandler(res);
 
@@ -426,27 +426,38 @@ class SimpleESI {
 						// Ignore if response is not JSON or storage fails
 					}
 				}
+				if (!res.ok) {
+					console.error(res);
+					console.error(await res.text());
+				}
 
 				// Rate limit handling with error protection
 				try {
-					const bucket = getHeader(res, 'x-ratelimit-group');
-					const remain = Number(getHeader(res, 'x-ratelimit-remaining') || 999999);
+					const retry_after = getHeader(res, 'retry-after');
+					if (retry_after) {
+						const delay = (Number(retry_after) || 60) * 1000;
+						this.logger(`Received Retry-After header, waiting ${delay}ms before next request`, method, url);
+						await new Promise(resolve => setTimeout(resolve, delay));
+					} else {
+						const bucket = getHeader(res, 'x-ratelimit-group');
+						const remain = Number(getHeader(res, 'x-ratelimit-remaining') || 999999);
 
-					if (bucket) {
-						if (this._bucket_values[this.whoami.character_id] === undefined) {
-							this._bucket_values[this.whoami.character_id] = {};
+						if (bucket) {
+							if (this._bucket_values[this.whoami.character_id] === undefined) {
+								this._bucket_values[this.whoami.character_id] = {};
+							}
+							this._bucket_values[this.whoami.character_id][bucket] = { remain: remain, epoch: new Date().getTime() };
 						}
-						this._bucket_values[this.whoami.character_id][bucket] = { remain: remain, epoch: new Date().getTime() };
-					}
-					if (remain <= 50) {
-						const rateLimitHeader = getHeader(res, 'x-ratelimit-limit');
-						if (rateLimitHeader) {
-							// Exponential backoff: more aggressive as we approach limit
-							const delay = 6 - Math.floor(remain / 10);
-							const baseDelay = parseRateLimit(rateLimitHeader);
-							const rateLimitRateMs = (delay * 1000) + baseDelay;
-							this.logger(`Rate limit nearly exceeded (${remain} remaining), waiting ${rateLimitRateMs}ms`, method, url);
-							await new Promise(resolve => setTimeout(resolve, rateLimitRateMs));
+						if (remain <= 50) {
+							const rateLimitHeader = getHeader(res, 'x-ratelimit-limit');
+							if (rateLimitHeader) {
+								// Exponential backoff: more aggressive as we approach limit
+								const delay = remain == 0 ? 60 : 6 - Math.floor(remain / 10);
+								const baseDelay = parseRateLimit(rateLimitHeader);
+								const rateLimitRateMs = (delay * 1000) + baseDelay;
+								this.logger(`Rate limit nearly exceeded (${remain} remaining), waiting ${rateLimitRateMs}ms`, method, url);
+								await new Promise(resolve => setTimeout(resolve, rateLimitRateMs));
+							}
 						}
 					}
 				} catch (err) {

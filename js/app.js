@@ -46,20 +46,22 @@ function doBtnBinds() {
 
 async function main() {
 	try {
-		console.log('app.js main() starting');
 		if (window.esi?.ready) {
 			await window.esi.ready;
 		}
 		if (!window.esi) {
 			throw new Error('ESI initialization failed or not available');
 		}
-		await initThemeMode();
-		await initLayoutMode();
-		initCacheAutoRender();
-		initBackgroundCharacterRefresh();
-		initSpaNavigation();
-		await handleRoute();
-		primeCharacterCachesOnStartup();
+
+		if (await handleRoute()) {
+			await initThemeMode();
+			await initLayoutMode();
+
+			initCacheAutoRender();
+			initSpaNavigation();
+			initBackgroundCharacterRefresh();
+			primeCharacterCachesOnStartup();
+		}
 	} catch (err) {
 		console.error('Error in main():', err);
 		document.getElementById('about').innerHTML = '<p>Error during initialization. <a href="/login">Click here to login</a>.</p>';
@@ -113,32 +115,28 @@ async function handleRoute() {
 
 	if (path === '/auth') {
 		// Let SimpleESI auth callback workflow run on this route.
-		return;
+		return false;
 	}
 
 	if (path === '/login-check') {
-		if (window.esi.whoami !== null) {
+		if (window?.esi?.whoami !== null) {
 			history.replaceState(null, '', '/');
-			await renderLoggedInHome();
-			return;
+			return false;
 		}
 		await window.esi.authBegin();
-		return;
+		return false;
 	}
 
 	if (path === '/login') {
 		await window.esi.authBegin();
-		return;
+		return false;
 	}
 
 	if (path === '/logout') {
 		const confirmed = window.confirm('Logging out deletes all locally stored SkillQ data. Next time you log in, you will need to re-add all characters. Continue?');
 		if (!confirmed) {
 			history.replaceState(null, '', '/');
-			if (window.esi.whoami !== null) {
-				await renderLoggedInHome();
-			}
-			return;
+			return false;
 		}
 		await clearAllLocalSkillQData();
 		await window.esi.authLogout(true, false);
@@ -147,36 +145,36 @@ async function handleRoute() {
 
 	if (route.name === 'share') {
 		await renderSharedCharacterPage();
-		return;
+		return false;
 	}
 
 	if (route.name === 'readme') {
 		await renderReadmePage();
-		return;
+		return true;
 	}
 
-	if (window.esi.whoami === null) {
+	if (window?.esi?.whoami === null) {
 		if (path !== '/readme' && path !== '/readme/') {
 			history.replaceState(null, '', '/readme');
 		}
 		await renderReadmePage();
-		return;
+		return true;
 	}
 
 	if (route.name === 'char') {
 		await renderCharacterPage(route.charName, route.tab);
-		return;
+		return true;
 	}
 
 	if (route.name === 'item') {
 		showItemLoading(route.itemId);
 		await renderItemPage(route.itemId);
-		return;
+		return true;
 	}
 
 	if (route.name === 'manage') {
 		await renderManagePage();
-		return;
+		return true;
 	}
 
 	if (route.name === 'settings') {
@@ -184,10 +182,11 @@ async function handleRoute() {
 			history.replaceState(null, '', '/settings');
 		}
 		await renderAccountPage();
-		return;
+		return true;
 	}
 
 	await renderLoggedInHome();
+	return true;
 }
 
 function parseRoute(pathname) {
@@ -423,7 +422,7 @@ async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 	if (recordArray.length === 0) {
 		throw new Error('No overview skills are available to share yet.');
 	}
-	const encodedSkills = SkillUrlCodecSafe.encode(recordArray);
+	const encodedSkills = await encodeShareSkillsPayload(recordArray);
 	const shareContext = await getCharacterShareContext(characterId);
 	const encodedTotalSP = encodeCompactInt(totalSP);
 	const balanceCents = Math.max(0, Math.round(Number(character?.balance || 0) * 100));
@@ -549,6 +548,80 @@ function bytesToBase64Url(bytes) {
 		base64 = btoa(binary);
 	}
 	return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlToBytes(str) {
+	const base64 = String(str || '')
+		.replace(/-/g, '+')
+		.replace(/_/g, '/')
+		.padEnd(Math.ceil(String(str || '').length / 4) * 4, '=');
+
+	if (typeof Buffer !== 'undefined') {
+		return Uint8Array.from(Buffer.from(base64, 'base64'));
+	}
+
+	const binary = atob(base64);
+	const bytes = new Uint8Array(binary.length);
+	for (let index = 0; index < binary.length; index += 1) {
+		bytes[index] = binary.charCodeAt(index);
+	}
+	return bytes;
+}
+
+function supportsShareCompressionStreams() {
+	return typeof CompressionStream !== 'undefined' && typeof DecompressionStream !== 'undefined';
+}
+
+async function gzipBytes(bytes) {
+	const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+	const buffer = await new Response(stream).arrayBuffer();
+	return new Uint8Array(buffer);
+}
+
+async function gunzipBytes(bytes) {
+	const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+	const buffer = await new Response(stream).arrayBuffer();
+	return new Uint8Array(buffer);
+}
+
+async function encodeShareSkillsPayload(records) {
+	const rawPayload = SkillUrlCodecSafe.encode(records);
+	if (!supportsShareCompressionStreams()) {
+		return rawPayload;
+	}
+
+	try {
+		const compressedBytes = await gzipBytes(new TextEncoder().encode(rawPayload));
+		const compressedPayload = `c1_${bytesToBase64Url(compressedBytes)}`;
+		return compressedPayload.length < rawPayload.length ? compressedPayload : rawPayload;
+	} catch (err) {
+		console.warn('Unable to compress share payload, falling back to legacy format.', err);
+		return rawPayload;
+	}
+}
+
+async function decodeShareSkillsPayload(encodedSkills) {
+	const payload = String(encodedSkills || '').trim();
+	if (!payload) {
+		throw new Error('This shared link is missing required data.');
+	}
+
+	if (!payload.startsWith('c1_')) {
+		return SkillUrlCodecSafe.decode(payload);
+	}
+
+	if (!supportsShareCompressionStreams()) {
+		throw new Error('This shared link needs CompressionStream support in your browser.');
+	}
+
+	try {
+		const compressed = base64UrlToBytes(payload.slice(3));
+		const decompressed = await gunzipBytes(compressed);
+		const rawPayload = new TextDecoder().decode(decompressed);
+		return SkillUrlCodecSafe.decode(rawPayload);
+	} catch (err) {
+		throw new Error('This shared link could not be decompressed.');
+	}
 }
 
 async function hydrateSharedSkills(records) {
@@ -716,7 +789,7 @@ async function renderSharedCharacterPage() {
 			throw new Error('Sorry, that share link is invalid.');
 		}
 
-		const decodedRecords = SkillUrlCodecSafe.decode(encodedSkills);
+		const decodedRecords = await decodeShareSkillsPayload(encodedSkills);
 		const sharedData = await hydrateSharedSkills(decodedRecords);
 		const trainingSummary = findSharedTrainingSummary(sharedData.queue);
 		const sharedCharacter = {
