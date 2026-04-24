@@ -28,6 +28,7 @@ const THEME_MODE_KEY = '__ui:theme-mode';
 const MANAGE_SETTINGS_KEY = '__ui:manage-settings';
 const SKILL_ENABLES_INDEX_KEY = '__ui:skill-enables-index';
 const SHARE_URL_VERSION = 1;
+const SHARE_LINK_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 let layoutMode = 'restricted';
 let themeMode = 'dark';
 
@@ -884,6 +885,16 @@ async function renderSharedCharacterPage() {
 		if (!characterId || !encodedSkills || !providedSignature) {
 			throw new Error('This shared link is missing required data.');
 		}
+		if (snapshotUnix <= 0) {
+			throw new Error('This shared link is missing a snapshot timestamp and is no longer valid.');
+		}
+		const nowUnix = Math.floor(Date.now() / 1000);
+		if (snapshotUnix > nowUnix + 5 * 60) {
+			throw new Error('This shared link has an invalid snapshot timestamp.');
+		}
+		if (nowUnix - snapshotUnix > SHARE_LINK_MAX_AGE_SECONDS) {
+			throw new Error('This shared link has expired (older than 30 days).');
+		}
 		if (typeof SkillUrlCodecSafe === 'undefined') {
 			throw new Error('Share codec is not available.');
 		}
@@ -929,7 +940,15 @@ async function renderSharedCharacterPage() {
 		const snapshotText = snapshotUnix > 0
 			? `Snapshot taken at ${formatDateTime(snapshotUnix * 1000)} UTC. `
 			: '';
-		notice.innerHTML = `<ul><li>${snapshotText}</li><li>Only first 25 skills in skill queue are shown.</li><li>This link will automatically invalidate if the character changes corporations.</li></ul>`;
+		notice.innerHTML = `
+			<ul>
+				<li>${snapshotText}</li>
+				<li>Only first 25 skills in skill queue are shown.</li>
+				<li>This link will automatically invalidate if the character changes corporations.</li>
+				<li>Share links expire after 30 days.</li>
+				<li>A crafty person <em>could</em> tamper with the URL to share a fake character data.</li>
+			</ul>
+		`;
 		page.appendChild(notice);
 
 		page.appendChild(renderSharedCharSkills({ queue: sharedData.queue, skills: sharedData.skills, totalSP: sharedTotalSP }));
