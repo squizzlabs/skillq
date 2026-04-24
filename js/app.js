@@ -946,7 +946,7 @@ async function renderSharedCharacterPage() {
 				<li>Only first 25 skills in skill queue are shown.</li>
 				<li>This link will automatically invalidate if the character changes corporations.</li>
 				<li>Share links expire after 30 days.</li>
-				<li>A crafty person <em>could</em> tamper with the URL to share a fake character data.</li>
+				<li>A crafty person <em>could</em> tamper with the URL to share fake character data.</li>
 			</ul>
 		`;
 		page.appendChild(notice);
