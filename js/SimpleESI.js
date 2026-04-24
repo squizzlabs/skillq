@@ -40,6 +40,7 @@
 
 class SimpleESI {
 	_bucket_values = {};
+	_locks = {};
 
 	getBucketValues() {
 		return this._bucket_values;
@@ -330,112 +331,133 @@ class SimpleESI {
 	}
 
 	async doRequest(url, method = 'GET', headers = null, body = null) {
-		if (headers === null) headers = {};
-		headers['User-Agent'] = this.whoami
-			? `${this.options.appName} (Character: ${this.whoami.name} / ${this.whoami.character_id})`
-			: `${this.options.appName} (auth not established or in progress)`;
-		headers['X-User-Agent'] = headers['User-Agent']; // Because Chrome wants to be special and override....
-
-		// Add conditional request headers for caching optimization
-		const cacheKey = `esi-cache-${url}`;
-		const cachedData = await this.lsGet(cacheKey, true);
-		if (cachedData && method === 'GET') {
-			if (cachedData.etag) {
-				headers['If-None-Match'] = cachedData.etag;
-			}
-			if (cachedData.lastModified) {
-				headers['If-Modified-Since'] = cachedData.lastModified;
-			}
-		}
-
-		let params = {
-			method: method,
-			headers: headers
-		};
-		if (body !== null) {
-			if (typeof body === 'object') params.body = new URLSearchParams(body).toString();
-			else params.body = body;
-		}
-
-		let res;
+		const lockKey = `request_lock_${method}_${url}`;
 		try {
-			this.inflight++;
-			this.esiInFlightHandler(this.inflight);
-			res = await fetch(url, params);
-			if (res.status >= 500) this.esiIssueHandler(res);
+			while (this._locks[lockKey]) {
+				await new Promise(resolve => setTimeout(resolve, 100));
+			}
+			this._locks[lockKey] = true;
 
-			// Cache ETag and Last-Modified headers for future conditional requests
-			if (method === 'GET' && res.ok) {
-				try {
-					const etag = getHeader(res, 'etag');
-					const lastModified = getHeader(res, 'last-modified');
-					if (etag || lastModified) {
-						await this.lsSet(cacheKey, { etag, lastModified }, true);
-					}
-				} catch (err) {
-					// Ignore cache storage errors
+			if (headers === null) headers = {};
+			headers['User-Agent'] = this.whoami
+				? `${this.options.appName} (Character: ${this.whoami.name} / ${this.whoami.character_id})`
+				: `${this.options.appName} (auth not established or in progress)`;
+			headers['X-User-Agent'] = headers['User-Agent']; // Because Chrome wants to be special and override....
+
+			// Add conditional request headers for caching optimization
+			const cacheKey = `esi-cache-${url}`;
+			const cachedData = method == 'GET' ? await this.lsGet(cacheKey, true) : null;
+
+			if (cachedData) {
+				// Are we within the Expires window? If so, return that data
+				if (cachedData.expires && new Date(cachedData.expires).getTime() > Date.now()) {
+					return new Response(JSON.stringify(cachedData.data), {
+						status: 200,
+						statusText: 'OK (Cached)',
+						headers: { 'Content-Type': 'application/json' }
+					});
+				}
+
+				if (cachedData.etag) {
+					headers['If-None-Match'] = cachedData.etag;
+				}
+				if (cachedData.lastModified) {
+					headers['If-Modified-Since'] = cachedData.lastModified;
 				}
 			}
 
-			// Handle 304 Not Modified - return cached data
-			if (res.status === 304 && cachedData && cachedData.data) {
-				// Create a synthetic response from cached data
-				res = new Response(JSON.stringify(cachedData.data), {
-					status: 200,
-					statusText: 'OK (Cached)',
-					headers: res.headers
-				});
-			} else if (method === 'GET' && res.ok) {
-				// Store response data for future 304 responses
-				try {
-					const clonedRes = res.clone();
-					const data = await clonedRes.json();
-					const etag = getHeader(res, 'etag');
-					const lastModified = getHeader(res, 'last-modified');
-					if (etag || lastModified) {
-						await this.lsSet(cacheKey, { etag, lastModified, data }, true);
-					}
-				} catch (err) {
-					// Ignore if response is not JSON or storage fails
-				}
+			let params = {
+				method: method,
+				headers: headers
+			};
+			if (body !== null) {
+				if (typeof body === 'object') params.body = new URLSearchParams(body).toString();
+				else params.body = body;
 			}
 
-			// Rate limit handling with error protection
+			let res;
 			try {
-				const bucket = getHeader(res, 'x-ratelimit-group');
-				const remain = Number(getHeader(res, 'x-ratelimit-remaining') || 999999);
+				this.inflight++;
+				this.esiInFlightHandler(this.inflight);
+				res = await fetch(url, params);
+				if (res.status >= 500) this.esiIssueHandler(res);
 
-				if (bucket) {
-					if (this._bucket_values[this.whoami.character_id] === undefined) {
-						this._bucket_values[this.whoami.character_id] = {};
-					}
-					this._bucket_values[this.whoami.character_id][bucket] = { remain: remain, epoch: new Date().getTime() };
-				}
-				if (remain <= 50) {
-					const rateLimitHeader = getHeader(res, 'x-ratelimit-limit');
-					if (rateLimitHeader) {
-						// Exponential backoff: more aggressive as we approach limit
-						const delay = 6 - Math.floor(remain / 10);
-						const baseDelay = parseRateLimit(rateLimitHeader);
-						const rateLimitRateMs = (delay * 1000) + baseDelay;
-						this.logger(`Rate limit nearly exceeded (${remain} remaining), waiting ${rateLimitRateMs}ms`, method, url);
-						await new Promise(resolve => setTimeout(resolve, rateLimitRateMs));
+				// Cache ETag and Last-Modified headers for future conditional requests
+				if (method === 'GET' && res.ok) {
+					try {
+						const etag = getHeader(res, 'etag');
+						const lastModified = getHeader(res, 'last-modified');
+						if (etag || lastModified) {
+							await this.lsSet(cacheKey, { etag, lastModified }, true);
+						}
+					} catch (err) {
+						// Ignore cache storage errors
 					}
 				}
-			} catch (err) {
-				this.errorlogger('Rate limit parsing error:', err);
+
+				// Handle 304 Not Modified - return cached data
+				if (res.status === 304 && cachedData && cachedData.data) {
+					// Create a synthetic response from cached data
+					res = new Response(JSON.stringify(cachedData.data), {
+						status: 200,
+						statusText: 'OK (Cached)',
+						headers: res.headers
+					});
+				} else if (method === 'GET' && res.ok) {
+					// Store response data for future 304 responses
+					try {
+						const clonedRes = res.clone();
+						const data = await clonedRes.json();
+						const expires = getHeader(res, 'expires');
+						const etag = getHeader(res, 'etag');
+						const lastModified = getHeader(res, 'last-modified');
+						if (etag || lastModified) {
+							await this.lsSet(cacheKey, { etag, lastModified, expires, data }, true);
+						}
+					} catch (err) {
+						// Ignore if response is not JSON or storage fails
+					}
+				}
+
+				// Rate limit handling with error protection
+				try {
+					const bucket = getHeader(res, 'x-ratelimit-group');
+					const remain = Number(getHeader(res, 'x-ratelimit-remaining') || 999999);
+
+					if (bucket) {
+						if (this._bucket_values[this.whoami.character_id] === undefined) {
+							this._bucket_values[this.whoami.character_id] = {};
+						}
+						this._bucket_values[this.whoami.character_id][bucket] = { remain: remain, epoch: new Date().getTime() };
+					}
+					if (remain <= 50) {
+						const rateLimitHeader = getHeader(res, 'x-ratelimit-limit');
+						if (rateLimitHeader) {
+							// Exponential backoff: more aggressive as we approach limit
+							const delay = 6 - Math.floor(remain / 10);
+							const baseDelay = parseRateLimit(rateLimitHeader);
+							const rateLimitRateMs = (delay * 1000) + baseDelay;
+							this.logger(`Rate limit nearly exceeded (${remain} remaining), waiting ${rateLimitRateMs}ms`, method, url);
+							await new Promise(resolve => setTimeout(resolve, rateLimitRateMs));
+						}
+					}
+				} catch (err) {
+					this.errorlogger('Rate limit parsing error:', err);
+				}
+
+				return res;
+			} catch (e) {
+				this.errorlogger(e);
+				// Pass undefined explicitly if res was never set
+				this.esiIssueHandler(e, res || null);
+				// Re-throw to let caller handle the error
+				throw e;
+			} finally {
+				this.inflight--;
+				this.esiInFlightHandler(this.inflight);
 			}
-
-			return res;
-		} catch (e) {
-			this.errorlogger(e);
-			// Pass undefined explicitly if res was never set
-			this.esiIssueHandler(e, res || null);
-			// Re-throw to let caller handle the error
-			throw e;
 		} finally {
-			this.inflight--;
-			this.esiInFlightHandler(this.inflight);
+			this._locks[lockKey] = false;
 		}
 	}
 
@@ -511,39 +533,48 @@ class SimpleESI {
 	}
 
 	async getAccessToken(character_id = this.whoami.character_id) {
-		if (await this.lsGet('access_token', character_id) === 'undefined') await this.lsDel('access_token', character_id);
-		let access_token_expires = parseInt(await this.lsGet('access_token_expires', character_id) || '0');
-		if (access_token_expires < Date.now() || await this.lsGet('access_token', character_id) === null) {
-			let authed_json = await this.lsGet('authed_json');
-			if (authed_json === null) return this.authLogout();
-			const body = {
-				grant_type: 'refresh_token',
-				refresh_token: authed_json.refresh_token,
-				client_id: this.ssoClientId
-			};
-			this.logger('Fetching new access token!');
-			let res = await this.doRequest(this.ssoTokenUrl, 'POST', this.mimetypeForm, body);
-			
-			if (!res || !res.ok) {
-				this.errorlogger('Token refresh failed:', res?.status);
-				return this.authLogout();
+		const lockKey = `access_token_lock_${character_id}`;
+		try {
+			while (this._locks[lockKey]) {
+				await new Promise(resolve => setTimeout(resolve, 1000));
 			}
+			this._locks[lockKey] = true;
+
+			if (await this.lsGet('access_token', character_id) === 'undefined') await this.lsDel('access_token', character_id);
+			let access_token_expires = parseInt(await this.lsGet('access_token_expires', character_id) || '0');
+			if (access_token_expires < Date.now() || await this.lsGet('access_token', character_id) === null) {
+				let authed_json = await this.lsGet('authed_json');
+				if (authed_json === null) return this.authLogout();
+				const body = {
+					grant_type: 'refresh_token',
+					refresh_token: authed_json.refresh_token,
+					client_id: this.ssoClientId
+				};
+				this.logger('Fetching new access token!');
+				let res = await this.doRequest(this.ssoTokenUrl, 'POST', this.mimetypeForm, body);
 			
-			let json = await res.json();
+				if (!res || !res.ok) {
+					this.errorlogger('Token refresh failed:', res?.status);
+					return this.authLogout();
+				}
+			
+				let json = await res.json();
 
-			if (!json.access_token || !json.expires_in) {
-				this.errorlogger('Invalid token refresh response');
-				return this.authLogout();
+				if (!json.access_token || !json.expires_in) {
+					this.errorlogger('Invalid token refresh response');
+					return this.authLogout();
+				}
+
+				await this.lsSet('access_token', json.access_token, character_id);
+				await this.lsSet('access_token_expires', Date.now() + (1000 * (json.expires_in - 2)), character_id);
 			}
-
-			await this.lsSet('access_token', json.access_token, character_id);
-			await this.lsSet('access_token_expires', Date.now() + (1000 * (json.expires_in - 2)), character_id);
+			return await this.lsGet('access_token', character_id);
+		} finally {
+			this._locks[lockKey] = false;
 		}
-		return await this.lsGet('access_token', character_id);
 	}
 
 	/**
-	 * 
 	 * @param {String} key 
 	 * @param {*} global 
 	 * @returns 

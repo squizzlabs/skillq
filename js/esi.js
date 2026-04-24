@@ -9,6 +9,43 @@ const ESI_CHANNEL_NAME = 'skillq:esi-owner-channel';
 const ESI_OWNER_TTL_MS = 15000;
 const ESI_OWNER_HEARTBEAT_MS = 5000;
 
+if (window.location.hostname === '127.0.0.1') {
+	window.location = 'http://localhost:' + window.location.port + window.location.pathname + window.location.search + window.location.hash;
+} else {
+	(() => {
+		try {
+			const callbackUrl =
+				window.location.protocol +
+				'//' +
+				window.location.hostname +
+				(window.location.port === '' ? '' : ':' + window.location.port) +
+				'/auth';
+			console.log('Initializing ESI with callback URL:', callbackUrl);
+
+			window.esi = new SimpleESI({
+				appName: APP_NAME,
+				clientID: localhost ? ssoLocalClientId : ssoPublicClientId,
+				loginURL: '/login',
+				authURL: '/auth',
+				logoutURL: '/logout',
+				callbackUrl,
+				scopes: [
+					"publicData",
+					"esi-skills.read_skills.v1",
+					"esi-skills.read_skillqueue.v1",
+					"esi-wallet.read_character_wallet.v1",
+					"esi-clones.read_clones.v1",
+					"esi-clones.read_implants.v1"
+				]
+			});
+			installSingleTabEsiCoordinator(window.esi);
+			console.log('ESI initialized');
+		} catch (e) {
+			console.log(e);
+		}
+	})();
+}
+
 function installSingleTabEsiCoordinator(esi) {
 	if (!esi || typeof BroadcastChannel === 'undefined') return;
 
@@ -184,41 +221,4 @@ function installSingleTabEsiCoordinator(esi) {
 
 	esi.doJsonRequest = async (...args) => await runSingleTabRequest('doJsonRequest', args);
 	esi.doJsonAuthRequest = async (...args) => await runSingleTabRequest('doJsonAuthRequest', args);
-}
-
-if (window.location.hostname === '127.0.0.1') {
-	window.location = 'http://localhost:' + window.location.port + window.location.pathname + window.location.search + window.location.hash;
-} else {
-	(() => {
-		try {
-			const callbackUrl =
-				window.location.protocol +
-				'//' +
-				window.location.hostname +
-				(window.location.port === '' ? '' : ':' + window.location.port) +
-				'/auth';
-			console.log('Initializing ESI with callback URL:', callbackUrl);
-
-			window.esi = new SimpleESI({
-				appName: APP_NAME,
-				clientID: localhost ? ssoLocalClientId : ssoPublicClientId,
-				loginURL: '/login',
-				authURL: '/auth',
-				logoutURL: '/logout',
-				callbackUrl,
-				scopes: [
-					"publicData",
-					"esi-skills.read_skills.v1",
-					"esi-skills.read_skillqueue.v1",
-					"esi-wallet.read_character_wallet.v1",
-					"esi-clones.read_clones.v1",
-					"esi-clones.read_implants.v1"
-				]
-			});
-			installSingleTabEsiCoordinator(window.esi);
-			console.log('ESI initialized');
-		} catch (e) {
-			console.log(e);
-		}
-	})();
 }

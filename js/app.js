@@ -59,7 +59,7 @@ async function main() {
 		initBackgroundCharacterRefresh();
 		initSpaNavigation();
 		await handleRoute();
-		void primeCharacterCachesOnStartup();
+		primeCharacterCachesOnStartup();
 	} catch (err) {
 		console.error('Error in main():', err);
 		document.getElementById('about').innerHTML = '<p>Error during initialization. <a href="/login">Click here to login</a>.</p>';
@@ -94,11 +94,11 @@ function initSpaNavigation() {
 
 		event.preventDefault();
 		if (url.pathname === window.location.pathname) return;
-		void navigateTo(url.pathname + url.search + url.hash);
+		navigateTo(url.pathname + url.search + url.hash);
 	});
 
 	window.addEventListener('popstate', () => {
-		void handleRoute();
+		handleRoute();
 	});
 }
 
@@ -880,7 +880,7 @@ async function renderLoggedInHome() {
 		}));
 	}
 
-	void refreshCharacterSummariesInBackground(characters);
+	refreshCharacterSummariesInBackground(characters);
 
 	const netSummary = document.getElementById('net-summary');
 	if (orderedSummaries.length > 1) {
@@ -1015,7 +1015,7 @@ async function renderCharacterPage(charName, tab = 'overview') {
 	document.getElementById('skillq').classList.remove('d-none');
 	startCountdowns();
 
-	void refreshCharacterPageInBackground(characterId, activeTab);
+	refreshCharacterPageInBackground(characterId, activeTab);
 }
 
 function buildCharacterInfoSignature(data) {
@@ -1174,7 +1174,7 @@ async function renderManagePage() {
 		removeBtn.dataset.characterId = charId;
 		removeBtn.dataset.characterName = char.name;
 		removeBtn.addEventListener('click', () => {
-			void removeManagedCharacter(charId, char.name);
+			removeManagedCharacter(charId, char.name);
 		});
 		actionCell.appendChild(removeBtn);
 		row.appendChild(actionCell);
@@ -1558,12 +1558,12 @@ function _createPersistentItemSection({ title, storageKey, content, defaultExpan
 		body.hidden = !next;
 		_setStoredUiExpandedState(storageKey, next);
 		if (next) {
-			void ensureExpandedContent();
+			ensureExpandedContent();
 		}
 	});
 
 	if (expanded) {
-		void ensureExpandedContent();
+		ensureExpandedContent();
 	}
 
 	section.appendChild(toggle);
@@ -2079,7 +2079,7 @@ async function loadCharacterPageDataFromCache(characterId, tab) {
 
 async function refreshCharacterSummariesInBackground(characters) {
 	for (const char of characters) {
-		void refreshCharacterSummaryInBackground(String(char.character_id), char.name);
+		refreshCharacterSummaryInBackground(String(char.character_id), char.name);
 	}
 }
 
@@ -2181,9 +2181,9 @@ function initBackgroundCharacterRefresh() {
 	if (backgroundRefreshInitialized) return;
 	backgroundRefreshInitialized = true;
 
-	void triggerScheduledBackgroundRefresh();
+	triggerScheduledBackgroundRefresh();
 	setInterval(() => {
-		void triggerScheduledBackgroundRefresh();
+		triggerScheduledBackgroundRefresh();
 	}, BACKGROUND_REFRESH_INTERVAL_MS);
 }
 
@@ -2219,7 +2219,7 @@ function bindLayoutToggle() {
 	toggle.dataset.bound = 'true';
 	toggle.addEventListener('click', (event) => {
 		event.preventDefault();
-		void toggleLayoutMode();
+		toggleLayoutMode();
 	});
 }
 
@@ -2260,7 +2260,7 @@ function scheduleRouteRerender() {
 		routeRerenderScheduled = false;
 		if (!window.esi?.whoami) return;
 		if (window.location.pathname === '/auth') return;
-		void handleRoute();
+		handleRoute();
 	}, 120);
 }
 
@@ -2275,6 +2275,8 @@ async function triggerScheduledBackgroundRefresh() {
 async function refreshAllCharactersInBackground() {
 	try {
 		if (!window.esi?.whoami) return;
+		console.log('Running scheduled background character data refresh');
+
 		const characters = await window.esi.getLoggedInCharacters();
 		const tasks = [];
 		for (const char of characters) {
