@@ -17,34 +17,52 @@
  * - Safe for missing optional fields
  * - More compact than plain JSON
  *
- * Encoding format, version 2:
+ * Encoding format, version 3:
  *
  * Header:
  * - version: varuint
- * - record count: varuint
+ * - timed_count: uint8
+ *   - number of records that include training data (start and/or end)
+ *   - these records are stored first, preserving relative order
+ * - record_count: varuint
+ *   - total number of records (timed + untimed)
  *
- * Per record:
- * - type_id_delta: signed varint (zig-zag encoded)
- *   - first record: type_id - 0
- *   - later records: type_id - previous type_id
- * - flags: 1 byte
- *   - bits 0-2: level (0-7, we only allow 0-5)
- *   - bit 3: training_start present
- *   - bit 4: training_end present
- * - training_start: unsigned varint, only if present
- * - training_end: unsigned varint, only if present
+ * Record ordering:
+ * - Records are reordered during encoding:
+ *   - first `timed_count` records = records with training data
+ *   - remaining records = records without training data
+ * - Relative order within each group is preserved
  *
- * Notes:
- * - Record input order is preserved.
- * - Decoder supports legacy version 1 payloads for backward compatibility.
- * - This implementation supports both browser and Node.js environments.
+ * 1) type_id stream:
+ * - Each record writes:
+ *   - type_id_delta: signed varint (zig-zag encoded)
+ *     - first record: type_id - 0
+ *     - subsequent: type_id - previous type_id
+ *
+ * 2) level stream:
+ * - Each record has:
+ *   - level: 3 bits
+ *
+ * 3) flags stream (timed records only):
+ * - 1 bit per timed record:
+ *   - bit 0: training_start present
+ * - Packed consecutively into bytes (LSB first)
+ *
+ * 4) timestamp stream (timed records only):
+ * - For each timed record (in order):
+ *   - if training_start present:
+ *       - training_start_delta: varuint
+ *         - stored as delta from previous training_start (initial = 0)
+ *   - training_end: varuint
+ *       - always present for timed records
+ *       - represents duration / delta (not absolute time)
  */
 const SkillUrlCodecSafe = (() => {
 	/**
 	 * Binary format version.
 	 * Bump this if the encoding layout changes in the future.
 	 */
-	const VERSION = 2;
+	const VERSION = 3;
 
 	/**
 	 * Validates that a value is a JavaScript safe integer.
@@ -293,7 +311,6 @@ const SkillUrlCodecSafe = (() => {
 	 *
 	 * Behavior:
 	 * - Validates all records
-	 * - Preserves input record order
 	 * - Writes the binary format described at the top of this file
 	 * - Returns base64url text safe for use in URLs
 	 *
@@ -313,44 +330,82 @@ const SkillUrlCodecSafe = (() => {
 
 		const normalized = records.map(normalizeRecord);
 
+		const timed = [];
+		const untimed = [];
+		for (const r of normalized) {
+			if (r.training_start !== undefined || r.training_end !== undefined) {
+				timed.push(r);
+			} else {
+				untimed.push(r);
+			}
+		}
+		const sorted = timed.concat(untimed);
+
 		const out = [];
 
 		// Write file format version.
 		writeVarUint(out, VERSION);
 
-		// Write number of records.
-		writeVarUint(out, normalized.length);
+		// Write timed count
+		if (timed.length > 255) {
+			throw new Error("Too many timed records");
+		}
+		out.push(timed.length);
 
+		// Write total count
+		writeVarUint(out, sorted.length);
+
+		// Write type ids
 		let prevTypeId = 0;
+		for (const record of sorted) {
+			writeVarInt(out, record.type_id - prevTypeId);
+			prevTypeId = record.type_id;
+		}
 
-		for (let i = 0; i < normalized.length; i++) {
-			const rec = normalized[i];
-			const hasStart = rec.training_start !== undefined;
-			const hasEnd = rec.training_end !== undefined;
+		// Write levels with bit packing
+		let bitBuffer = 0;
+		let bitCount = 0;
+		for (const record of sorted) {
+			bitBuffer |= (record.level & 0x07) << bitCount;
+			bitCount += 3;
+			while (bitCount >= 8) {
+				out.push(bitBuffer & 0xff);
+				bitBuffer >>= 8;
+				bitCount -= 8;
+			}
+		}
+		if (bitCount > 0) {
+			out.push(bitBuffer);
+		}
 
-			// Write type_id delta as signed varint to preserve input order.
-			writeVarInt(out, rec.type_id - prevTypeId);
+		// Write flags
+		let flagBuf = 0;
+		let flagBits = 0;
+		for (let i = 0; i < timed.length; i++) {
+			const record = timed[i];
+			const hasStart = record.training_start !== undefined ? 1 : 0;
+			flagBuf |= hasStart << flagBits;
+			flagBits += 1;
+			while (flagBits >= 8) {
+				out.push(flagBuf & 0xff);
+				flagBuf >>= 8;
+				flagBits -= 8;
+			}
+		}
+		if (flagBits > 0) {
+			out.push(flagBuf);
+		}
 
-			prevTypeId = rec.type_id;
-
-			// Build flags byte:
-			// bits 0-2 = level
-			// bit 3 = has training_start
-			// bit 4 = has training_end
-			let flags = rec.level & 0x07;
-			if (hasStart) flags |= 1 << 3;
-			if (hasEnd) flags |= 1 << 4;
-
-			out.push(flags);
-
-			// Write optional timestamps only when present.
+		let prevStart = 0;
+		for (let i = 0; i < timed.length; i++) {
+			const record = timed[i];
+			const hasStart = record.training_start !== undefined;
 			if (hasStart) {
-				writeVarUint(out, rec.training_start);
+				const deltaStart = record.training_start - prevStart;
+				writeVarUint(out, deltaStart);
+				prevStart = record.training_start;
 			}
-
-			if (hasEnd) {
-				writeVarUint(out, rec.training_end);
-			}
+			writeVarUint(out, record.training_end);
 		}
 
 		return bytesToBase64Url(Uint8Array.from(out));
@@ -385,6 +440,9 @@ const SkillUrlCodecSafe = (() => {
 		}
 		if (version === 2) {
 			return decodeV2(bytes, state);
+		}
+		if (version === 3) {
+			return decodeV3(bytes, state);
 		}
 		throw new Error(`Unsupported version: ${version}`);
 	}
@@ -459,6 +517,71 @@ const SkillUrlCodecSafe = (() => {
 			}
 
 			records.push(rec);
+		}
+
+		if (state.offset !== bytes.length) {
+			throw new Error("Extra trailing bytes detected");
+		}
+
+		return records;
+	}
+
+	function decodeV3(bytes, state) {
+		if (state.offset >= bytes.length) {
+			throw new Error("Unexpected end while reading timed count");
+		}
+		const timedCount = bytes[state.offset++];
+		const count = readVarUint(bytes, state);
+		const records = new Array(count);
+
+		let prevTypeId = 0;
+		for (let i = 0; i < count; i++) {
+			const typeId = prevTypeId + readVarInt(bytes, state);
+			prevTypeId = typeId;
+			records[i] = { type_id: typeId };
+		}
+
+		let bitBuffer = 0;
+		let bitCount = 0;
+		for (let i = 0; i < count; i++) {
+			while (bitCount < 3) {
+				if (state.offset >= bytes.length) {
+					throw new Error("Unexpected end while reading levels");
+				}
+				bitBuffer |= bytes[state.offset++] << bitCount;
+				bitCount += 8;
+			}
+			records[i].level = bitBuffer & 0x07;
+			bitBuffer >>= 3;
+			bitCount -= 3;
+		}
+
+		const hasStartArr = new Array(timedCount);
+		let flagBuf = 0;
+		let flagBits = 0;
+		for (let i = 0; i < timedCount; i++) {
+			while (flagBits < 1) {
+				if (state.offset >= bytes.length) {
+					throw new Error("Unexpected end while reading flags");
+				}
+				flagBuf |= bytes[state.offset++] << flagBits;
+				flagBits += 8;
+			}
+			hasStartArr[i] = flagBuf & 1;
+			flagBuf >>= 1;
+			flagBits -= 1;
+		}
+
+		let prevStart = 0;
+		for (let i = 0; i < timedCount; i++) {
+			const hasStart = hasStartArr[i] !== 0;
+			if (hasStart) {
+				const deltaStart = readVarUint(bytes, state);
+				const start = prevStart + deltaStart;
+				records[i].training_start = start;
+				prevStart = start;
+			}
+			records[i].training_end = readVarUint(bytes, state);
 		}
 
 		if (state.offset !== bytes.length) {
