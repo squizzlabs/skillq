@@ -1,0 +1,67 @@
+name: Update SDE Data
+
+on:
+  schedule:
+    - cron: '0 12,16 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-sde-data
+  cancel-in-progress: false
+
+jobs:
+  update-sde-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Ensure required commands are available
+        run: |
+          set -euo pipefail
+
+          need_apt=0
+          for cmd in curl unzip jq mktemp; do
+            if ! command -v "$cmd" >/dev/null 2>&1; then
+              need_apt=1
+            fi
+          done
+
+          if [[ "$need_apt" -eq 1 ]]; then
+            sudo apt-get update
+            sudo apt-get install -y curl unzip jq coreutils
+          fi
+
+          curl --version >/dev/null
+          unzip -v >/dev/null
+          jq --version >/dev/null
+          mktemp --version >/dev/null
+
+      - name: Run SDE update script
+        run: bash data/update_sde_jsonl.sh
+
+      - name: Commit updated data files if changed
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/groups.json data/latest.json data/types.json
+
+          if git diff --cached --quiet; then
+            echo "No changes in SDE data files"
+            exit 0
+          fi
+
+          git commit -m "chore(data): update SDE JSON snapshots"
+
+          git pull --rebase origin main
+          git push origin HEAD:main
