@@ -9,6 +9,10 @@ const ESI_CHANNEL_NAME = 'skillq:esi-owner-channel';
 const ESI_OWNER_TTL_MS = 15000;
 const ESI_OWNER_HEARTBEAT_MS = 5000;
 
+function encodeCharacterNameForPath(name) {
+	return encodeURIComponent(String(name || '')).replace(/%20/g, '+');
+}
+
 if (window.location.hostname === '127.0.0.1') {
 	window.location = 'http://localhost:' + window.location.port + window.location.pathname + window.location.search + window.location.hash;
 } else {
@@ -29,7 +33,7 @@ if (window.location.hostname === '127.0.0.1') {
 				authURL: '/auth',
 				logoutURL: '/logout',
 				postAuthRedirect: (whoami) => {
-					const characterName = encodeURIComponent(whoami?.name || `${whoami?.character_id || ''}`);
+					const characterName = encodeCharacterNameForPath(whoami?.name || `${whoami?.character_id || ''}`);
 					return characterName ? `/char/${characterName}` : '/';
 				},
 				callbackUrl,

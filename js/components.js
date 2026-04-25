@@ -78,6 +78,10 @@ function toRomanNumeral(n) {
 	return map[Math.min(5, Math.max(0, Math.floor(n || 0)))] || '';
 }
 
+function encodeCharacterNameForPath(name) {
+	return encodeURIComponent(String(name || '')).replace(/%20/g, '+');
+}
+
 /* ─── Navbar ─────────────────────────────────────────────────────────────────
  *
  * renderNavbar({ characters, currentCharId, isLoggedIn })
@@ -103,7 +107,7 @@ function renderNavbar({ characters = [], currentCharId = null, isLoggedIn = fals
 	if (characters.length > 0) {
 		const strip = _el('div', 'sq-nav__chars');
 		for (const char of characters) {
-			const a = _a(`/char/${encodeURIComponent(char.name)}`, null, 'sq-nav__char-link');
+			const a = _a(`/char/${encodeCharacterNameForPath(char.name)}`, null, 'sq-nav__char-link');
 			if (!isHome && char.character_id == currentCharId) a.classList.add('sq-nav__char-link--active');
 			a.dataset.characterId = String(char.character_id);
 			a.title = char.name;
@@ -179,7 +183,7 @@ function renderCharCard({ character, training = null } = {}) {
 	const card = _el('div', 'sq-char-card');
 
 	// Portrait
-	const portraitLink = _a(`/char/${encodeURIComponent(name)}`, null, 'sq-char-card__portrait-link');
+	const portraitLink = _a(`/char/${encodeCharacterNameForPath(name)}`, null, 'sq-char-card__portrait-link');
 	portraitLink.appendChild(_img(
 		`https://images.evetech.net/characters/${character_id}/portrait?size=128`,
 		name,
@@ -191,7 +195,7 @@ function renderCharCard({ character, training = null } = {}) {
 	const info = _el('div', 'sq-char-card__info');
 
 	const nameEl = document.createElement('strong');
-	nameEl.appendChild(_a(`/char/${encodeURIComponent(name)}`, name));
+	nameEl.appendChild(_a(`/char/${encodeCharacterNameForPath(name)}`, name));
 	info.appendChild(nameEl);
 
 	info.appendChild(_el('div', 'sq-char-card__stat', `${numberFormat(balance, 2)} ISK`));
@@ -301,7 +305,7 @@ function renderCharInfo({ character, corporation = null, alliance = null, traini
  * activeTab: 'overview' | 'wallet' | 'train'
  */
 function renderCharMenu({ charName, activeTab = 'overview' } = {}) {
-	const encoded = encodeURIComponent(charName);
+	const encoded = encodeCharacterNameForPath(charName);
 	const tabs = [
 		{ id: 'overview', label: 'Overview', href: `/char/${encoded}/` },
 		{ id: 'wallet',   label: 'Wallet',   href: `/char/${encoded}/wallet/` },

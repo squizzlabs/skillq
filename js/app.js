@@ -220,9 +220,17 @@ function parseRoute(pathname) {
 	const parts = cleaned.split('/').filter(Boolean);
 	return {
 		name: 'char',
-		charName: decodeURIComponent(parts[1] || ''),
+		charName: decodeCharacterNameFromPath(parts[1] || ''),
 		tab: parts[2] || 'overview'
 	};
+}
+
+function encodeCharacterNameForPath(name) {
+	return encodeURIComponent(String(name || '')).replace(/%20/g, '+');
+}
+
+function decodeCharacterNameFromPath(value) {
+	return decodeURIComponent(String(value || '').replace(/\+/g, '%20'));
 }
 
 function renderNavbarInto(root, options) {
@@ -255,7 +263,7 @@ function canPatchNavbar(nav, { characters = [], isLoggedIn = false } = {}) {
 		if (!link) return false;
 		if (String(link.dataset.characterId || '') !== String(char.character_id)) return false;
 		if (String(link.title || '') !== String(char.name || '')) return false;
-		if (String(link.getAttribute('href') || '') !== `/char/${encodeURIComponent(char.name)}`) return false;
+		if (String(link.getAttribute('href') || '') !== `/char/${encodeCharacterNameForPath(char.name)}`) return false;
 	}
 
 	return true;
@@ -1407,7 +1415,7 @@ async function renderManagePage() {
 		const charCell = document.createElement('td');
 		charCell.dataset.label = 'Character';
 		const charLink = document.createElement('a');
-		charLink.href = `/char/${encodeURIComponent(char.name)}`;
+		charLink.href = `/char/${encodeCharacterNameForPath(char.name)}`;
 		charLink.textContent = char.name;
 		charCell.appendChild(charLink);
 		row.appendChild(charCell);
