@@ -2794,16 +2794,49 @@ async function fetchTrainingSuggestions(characterId) {
 		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId).catch(() => ({ skills: [] }))
 	]);
 
-	const implantInfos = await Promise.all((implants || []).slice(0, 5).map((typeId) => getTypeInfo(typeId)));
-	const attributeRows = ['charisma', 'intelligence', 'memory', 'perception', 'willpower'].map((attributeName, index) => ({
+	const implantInfos = await Promise.all((implants || []).map((typeId) => getTypeInfo(typeId)));
+	const implantByAttribute = buildAttributeImplantMap(implantInfos);
+	const attributeRows = ['charisma', 'intelligence', 'memory', 'perception', 'willpower'].map((attributeName) => ({
 		attributeName,
 		baseValue: Number(attributes?.[attributeName] || 0),
-		bonus: 0,
-		implantName: implantInfos[index]?.name || ''
+		bonus: Number(implantByAttribute[attributeName]?.bonus || 0),
+		implantName: implantByAttribute[attributeName]?.implantName || ''
 	})).filter((row) => row.baseValue > 0 || row.implantName);
 
 	const suggestions = await buildTrainingSuggestions(skillsResponse?.skills || [], attributes);
 	return { implants: attributeRows, suggestions };
+}
+
+function buildAttributeImplantMap(implantInfos = []) {
+	const bonusAttributeIdToName = {
+		175: 'charisma',
+		176: 'intelligence',
+		177: 'memory',
+		178: 'perception',
+		179: 'willpower'
+	};
+
+	const bestByAttribute = {
+		charisma: { bonus: 0, implantName: '' },
+		intelligence: { bonus: 0, implantName: '' },
+		memory: { bonus: 0, implantName: '' },
+		perception: { bonus: 0, implantName: '' },
+		willpower: { bonus: 0, implantName: '' }
+	};
+
+	for (const implantInfo of implantInfos) {
+		for (const [attributeId, attributeName] of Object.entries(bonusAttributeIdToName)) {
+			const bonus = Number(_getDogmaValue(implantInfo, Number(attributeId)) || 0);
+			if (bonus <= 0) continue;
+			if (bonus < Number(bestByAttribute[attributeName].bonus || 0)) continue;
+			bestByAttribute[attributeName] = {
+				bonus,
+				implantName: implantInfo?.name || ''
+			};
+		}
+	}
+
+	return bestByAttribute;
 }
 
 async function buildTrainingSuggestions(skills, attributes) {
