@@ -485,7 +485,7 @@ async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 		encodedBalance,
 		encodedSnapshotUnix
 	);
-	return `${window.location.origin}/share/${encodeURIComponent(characterId)}/${encodedSkills}.${signature}.${encodedTotalSP}.${encodedBalance}.${encodedSnapshotUnix}`;
+	return `${window.location.origin}/share/${encodeURIComponent(characterId)}#${encodedSkills}.${signature}.${encodedTotalSP}.${encodedBalance}.${encodedSnapshotUnix}`;
 }
 
 async function renderCurrentNavbarForUtilityPage() {
@@ -1028,6 +1028,30 @@ async function renderSharedCharacterPage() {
 function parseSharedCharacterRoute() {
 	const pathname = window.location.pathname.replace(/\/+$/, '') || '/share';
 	const parts = pathname.split('/').filter(Boolean);
+
+	// Current format: /share/<characterId>#<payload>
+	if (parts[0] === 'share' && parts.length === 2 && window.location.hash) {
+		const joined = window.location.hash.slice(1);
+		const segments = joined.split('.');
+		if (segments.length >= 5) {
+			const encodedSnapshotUnix = segments.pop();
+			const encodedBalance = segments.pop();
+			const encodedTotalSP = segments.pop();
+			const signature = segments.pop();
+			const encodedSkills = segments.join('.');
+			return {
+				version: SHARE_URL_VERSION,
+				characterId: decodeURIComponent(parts[1] || ''),
+				encodedSkills,
+				signature,
+				encodedTotalSP,
+				encodedBalance: encodedBalance || '',
+				encodedSnapshotUnix: encodedSnapshotUnix || ''
+			};
+		}
+	}
+
+	// Legacy format: /share/<characterId>/<payload> (path-based)
 	if (parts[0] === 'share' && parts.length >= 3) {
 		const joined = parts.slice(2).join('/');
 		const segments = joined.split('.');
