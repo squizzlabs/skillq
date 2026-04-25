@@ -334,12 +334,17 @@ function renderCharMenu({ charName, activeTab = 'overview' } = {}) {
  */
 function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP = 0 } = {}) {
 	const el = _el('div', 'sq-skills');
+	const now = Date.now();
+	const visibleQueue = (queue || []).filter((entry) => {
+		const endMs = entry?.endDate ? (Date.parse(entry.endDate) || 0) : 0;
+		return endMs <= 0 || endMs > now;
+	});
 
 	/* ── Skill Queue ── */
-	if (queue.length > 0) {
+	if (visibleQueue.length > 0) {
 		const section = _el('section', 'sq-queue');
 		const h4 = _el('h4', 'sq-section-title');
-		h4.innerHTML = `Skill Queue <small>(${queue.length} in queue. All times UTC)</small>`;
+		h4.innerHTML = `Skill Queue <small>(${visibleQueue.length} in queue. All times UTC)</small>`;
 		section.appendChild(h4);
 
 		const table = document.createElement('table');
@@ -347,7 +352,7 @@ function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP 
 		const thead = document.createElement('thead');
 		thead.innerHTML = '<tr><th>Skill</th><th>Group</th><th>Start</th><th>End</th><th>SP/h</th></tr>';
 		const tbody = document.createElement('tbody');
-		for (const skill of queue) {
+		for (const skill of visibleQueue) {
 			const tr = document.createElement('tr');
 			const queueLevel = Number(
 				skill.level
@@ -647,11 +652,12 @@ function renderCharTrain({ implants = [], suggestions = [] } = {}) {
 function renderSharedCharSkills({ queue = [], skills = [], totalSP = 0 } = {}) {
 	const el = _el('div', 'sq-skills');
 	const now = Date.now();
+	const visibleQueue = (queue || []).filter((entry) => Number(entry.trainingEndMs || 0) <= 0 || Number(entry.trainingEndMs || 0) > now);
 
-	if (queue.length > 0) {
+	if (visibleQueue.length > 0) {
 		const trainingSection = _el('section', 'sq-queue');
 		const trainingHeader = _el('h4', 'sq-section-title');
-		trainingHeader.innerHTML = `Skill Queue <small>(${queue.length} in queue. All times UTC)</small>`;
+		trainingHeader.innerHTML = `Skill Queue <small>(${visibleQueue.length} in queue. All times UTC)</small>`;
 		trainingSection.appendChild(trainingHeader);
 
 		const trainingTable = document.createElement('table');
@@ -660,7 +666,7 @@ function renderSharedCharSkills({ queue = [], skills = [], totalSP = 0 } = {}) {
 		trainingHead.innerHTML = '<tr><th>Skill</th><th>Group</th><th>Start</th><th>End</th></tr>';
 		const trainingBody = document.createElement('tbody');
 
-		for (const entry of queue) {
+		for (const entry of visibleQueue) {
 			const tr = document.createElement('tr');
 			const startMs = Number(entry.trainingStartMs || 0);
 			const endMs = Number(entry.trainingEndMs || 0);
@@ -711,10 +717,10 @@ function renderSharedCharSkills({ queue = [], skills = [], totalSP = 0 } = {}) {
 
 	// Build sets for active/queued annotation in the grouped skill list
 	const activeTypeIds = new Set(
-		queue.filter((e) => Number(e.trainingStartMs || 0) > 0 && Number(e.trainingEndMs || 0) > now && Number(e.trainingStartMs) <= now)
+		visibleQueue.filter((e) => Number(e.trainingStartMs || 0) > 0 && Number(e.trainingEndMs || 0) > now && Number(e.trainingStartMs) <= now)
 			.map((e) => e.typeID)
 	);
-	const queuedTypeIds = new Set(queue.map((e) => e.typeID));
+	const queuedTypeIds = new Set(visibleQueue.map((e) => e.typeID));
 
 	const controls = _el('div', 'sq-skill-controls');
 	const addCtrl = (label, fn) => {

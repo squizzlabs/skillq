@@ -146,6 +146,7 @@ async function handleRoute() {
 	}
 
 	if (route.name === 'share') {
+		await initLayoutMode();
 		await renderSharedCharacterPage();
 		return false;
 	}
@@ -773,17 +774,33 @@ async function hydrateSharedSkills(records) {
 		});
 
 	// Build per-skill entries for the grouped skill list
-	const maxQueueLevel = new Map();
+	const nowMs = Date.now();
+	const maxCompletedQueueLevel = new Map();
+	const maxPendingQueueLevel = new Map();
 	for (const entry of queue) {
-		maxQueueLevel.set(entry.typeID, Math.max(maxQueueLevel.get(entry.typeID) || 0, entry.targetLevel));
+		const endMs = Number(entry.trainingEndMs || 0);
+		const targetLevel = Number(entry.targetLevel || 0);
+		if (targetLevel <= 0) continue;
+
+		if (endMs > 0 && endMs <= nowMs) {
+			maxCompletedQueueLevel.set(entry.typeID, Math.max(maxCompletedQueueLevel.get(entry.typeID) || 0, targetLevel));
+		} else {
+			maxPendingQueueLevel.set(entry.typeID, Math.max(maxPendingQueueLevel.get(entry.typeID) || 0, targetLevel));
+		}
 	}
-	const allTypeIds = new Set([...trainedMap.keys(), ...queue.map((e) => e.typeID)]);
+	const allTypeIds = new Set([
+		...trainedMap.keys(),
+		...maxCompletedQueueLevel.keys(),
+		...maxPendingQueueLevel.keys()
+	]);
 	const skills = Array.from(allTypeIds)
 		.map((typeId) => {
 			const typeInfo = typeInfos.get(typeId);
 			const groupInfo = groupInfos.get(typeInfo?.group_id);
-			const trainedLevel = trainedMap.get(typeId) || 0;
-			const maxQueued = maxQueueLevel.get(typeId) || 0;
+			const snapshotTrainedLevel = trainedMap.get(typeId) || 0;
+			const completedFromQueue = maxCompletedQueueLevel.get(typeId) || 0;
+			const trainedLevel = Math.max(snapshotTrainedLevel, completedFromQueue);
+			const maxQueued = maxPendingQueueLevel.get(typeId) || 0;
 			return {
 				typeID: typeId,
 				typeName: typeInfo?.name || `Skill ${typeId}`,
@@ -923,8 +940,8 @@ async function renderSharedCharacterPage() {
 			throw new Error('This shared link is missing a snapshot timestamp and is no longer valid.');
 		}
 		const nowUnix = Math.floor(Date.now() / 1000);
-		if (snapshotUnix > nowUnix + 5 * 60) {
-			throw new Error('This shared link has an invalid snapshot timestamp.');
+		if (snapshotUnix > nowUnix) {
+			throw new Error('This shared link snapshot timestamp is in the future and is invalid.');
 		}
 		if (nowUnix - snapshotUnix > SHARE_LINK_MAX_AGE_SECONDS) {
 			throw new Error('This shared link has expired (older than 30 days).');
@@ -978,6 +995,7 @@ async function renderSharedCharacterPage() {
 			<ul>
 				<li>${snapshotText}</li>
 				<li>Only first 25 skills in skill queue are shown.</li>
+				<li>Skills considered completed are not shown in Skill Queue.</li>
 				<li>Share links invalidate if the character changes corporations.</li>
 				<li>Share links expire after 30 days.</li>
 				<li>A crafty person <em>could</em> tamper with the URL to share fake character data.</li>
