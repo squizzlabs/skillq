@@ -3,6 +3,7 @@ const ESI_BASE = 'https://esi.evetech.net';
 const LOOKUP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CHARACTER_DATA_TTL_MS = 60 * 60 * 1000;
 const BACKGROUND_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const BACKGROUND_REFRESH_JOB_INTERVAL_MS = 15 * 1000;
 const typeInfoCache = new Map();
 const groupInfoCache = new Map();
 const universeNameCache = new Map();
@@ -1331,6 +1332,7 @@ async function renderManagePage() {
 		groupInput.type = 'text';
 		groupInput.name = `group-${charId}`;
 		groupInput.value = String(manageSettings.groupedByCharacterId?.[charId] || '');
+		groupInput.dataset.initialValue = groupInput.value;
 		groupInput.className = 'sq-manage__input';
 		groupCell.appendChild(groupInput);
 		row.appendChild(groupCell);
@@ -1341,6 +1343,7 @@ async function renderManagePage() {
 		customInput.type = 'number';
 		customInput.name = `custom-${charId}`;
 		customInput.value = String(Number(manageSettings.customOrderByCharacterId?.[charId] || 0));
+		customInput.dataset.initialValue = customInput.value;
 		customInput.className = 'sq-manage__input sq-text-right';
 		customCell.appendChild(customInput);
 		row.appendChild(customCell);
@@ -1395,6 +1398,7 @@ async function renderManagePage() {
 		if (manageSettings.groupOrderBy === option.value) el.selected = true;
 		groupSelect.appendChild(el);
 	}
+	groupSelect.dataset.initialValue = groupSelect.value;
 	controls.appendChild(groupSelect);
 
 	const orderLabel = document.createElement('label');
@@ -1416,6 +1420,7 @@ async function renderManagePage() {
 		if (manageSettings.orderBy === option.value) el.selected = true;
 		orderSelect.appendChild(el);
 	}
+	orderSelect.dataset.initialValue = orderSelect.value;
 	controls.appendChild(orderSelect);
 
 	const saveBtn = document.createElement('button');
@@ -1494,6 +1499,7 @@ async function renderAccountPage() {
 		}
 		fluidSelect.appendChild(el);
 	}
+	fluidSelect.dataset.initialValue = fluidSelect.value;
 	fluidCell.appendChild(fluidSelect);
 	fluidRow.appendChild(fluidCell);
 	body.appendChild(fluidRow);
@@ -1517,6 +1523,7 @@ async function renderAccountPage() {
 		}
 		themeSelect.appendChild(el);
 	}
+	themeSelect.dataset.initialValue = themeSelect.value;
 	themeCell.appendChild(themeSelect);
 	themeRow.appendChild(themeCell);
 	body.appendChild(themeRow);
@@ -2290,7 +2297,7 @@ async function refreshCharacterSummariesInBackground() {
 			await cacheSetCharacterData(LAST_BACKGROUND_REFRESH_KEY, { updatedAt: Date.now() });
 		}
 	} finally {
-		setTimeout(refreshCharacterSummariesInBackground, 15000);
+		setTimeout(refreshCharacterSummariesInBackground, BACKGROUND_REFRESH_JOB_INTERVAL_MS);
 	}
 }
 
@@ -2512,8 +2519,38 @@ function scheduleRouteRerender() {
 		routeRerenderScheduled = false;
 		if (!window.esi?.whoami) return;
 		if (window.location.pathname === '/auth') return;
+		if ((window.location.pathname === '/manage' || window.location.pathname === '/manage/') && hasUnsavedManageChanges()) {
+			return;
+		}
+		if ((window.location.pathname === '/settings' || window.location.pathname === '/settings/' || window.location.pathname === '/account' || window.location.pathname === '/account/') && hasUnsavedAccountChanges()) {
+			return;
+		}
 		handleRoute();
 	}, 120);
+}
+
+function hasUnsavedManageChanges() {
+	const form = document.querySelector('.sq-manage-form');
+	if (!form) return false;
+	const fields = form.querySelectorAll('input[name^="group-"], input[name^="custom-"], select[name="groupOrderBy"], select[name="orderBy"]');
+	for (const field of fields) {
+		const initialValue = field.dataset.initialValue;
+		if (typeof initialValue === 'undefined') continue;
+		if (String(field.value ?? '') !== initialValue) return true;
+	}
+	return false;
+}
+
+function hasUnsavedAccountChanges() {
+	const form = document.querySelector('.sq-account-form');
+	if (!form) return false;
+	const fields = form.querySelectorAll('select[name="fluid"], select[name="themeMode"]');
+	for (const field of fields) {
+		const initialValue = field.dataset.initialValue;
+		if (typeof initialValue === 'undefined') continue;
+		if (String(field.value ?? '') !== initialValue) return true;
+	}
+	return false;
 }
 
 async function shouldRunScheduledRefresh() {
