@@ -1670,7 +1670,7 @@ async function renderItemPage(itemId) {
 	table.appendChild(tbody);
 	container.appendChild(_createPersistentItemSection({
 		title: 'All ESI Item Fields',
-		storageKey: `item:${parsedItemId}:fields`,
+		storageKey: 'item:fields',
 		defaultExpanded: true,
 		content: table
 	}));
@@ -1680,7 +1680,7 @@ async function renderItemPage(itemId) {
 	pre.textContent = JSON.stringify(typeInfo, null, 2);
 	container.appendChild(_createPersistentItemSection({
 		title: 'Raw ESI JSON',
-		storageKey: `item:${parsedItemId}:raw`,
+		storageKey: 'item:raw',
 		defaultExpanded: false,
 		content: pre
 	}));
