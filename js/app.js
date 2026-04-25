@@ -59,6 +59,9 @@ async function main() {
 
 			initCacheAutoRender();
 			initSpaNavigation();
+			if (window.esi?.whoami) {
+				initBackgroundRefresh();
+			}
 		}
 	} catch (err) {
 		console.error('Error in main():', err);
@@ -160,7 +163,6 @@ async function handleRoute() {
 	}
 
 	if (route.name === 'char') {
-		initBackgroundRefresh();
 		await renderCharacterPage(route.charName, route.tab);
 		return true;
 	}
@@ -184,7 +186,6 @@ async function handleRoute() {
 		return true;
 	}
 
-	initBackgroundRefresh();
 	await renderLoggedInHome();
 	return true;
 }
@@ -369,12 +370,8 @@ async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 	if (!characterId) {
 		throw new Error('Character information is missing.');
 	}
-	const queueResponse = await window.esi
-		.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId)
-		.catch(() => []);
-	const queue = (Array.isArray(queueResponse) ? queueResponse : [])
-		.slice(0, 25)
-		.sort((a, b) => Number(a?.queue_position || 0) - Number(b?.queue_position || 0));
+	const overviewCached = await cacheGetCharacterData(`overview:${characterId}`);
+	const queue = Array.isArray(overviewCached?.queue) ? overviewCached.queue : [];
 
 	// Encode each trained skill as a base record (current level, no timing)
 	const trainedRecords = (skills || [])
@@ -388,14 +385,14 @@ async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 	// first row keeps absolute start; all rows store end delta to previous queue boundary.
 	let previousQueueEndUnix = 0;
 	const queueRecords = queue
-		.filter((row) => Number(row?.skill_id || 0) > 0)
+		.filter((row) => Number(row?.typeID || 0) > 0)
 		.map((row, index) => {
 			const record = {
-				type_id: Number(row.skill_id),
-				level: Math.max(0, Math.min(5, Number(row.finished_level || 0)))
+				type_id: Number(row.typeID),
+				level: Math.max(0, Math.min(5, Number(row.level || 0)))
 			};
-			const startUnix = row.start_date ? Math.floor(Date.parse(row.start_date) / 1000) : 0;
-			const endUnix = row.finish_date ? Math.floor(Date.parse(row.finish_date) / 1000) : 0;
+			const startUnix = row.startDate ? Math.floor(Date.parse(row.startDate) / 1000) : 0;
+			const endUnix = row.endDate ? Math.floor(Date.parse(row.endDate) / 1000) : 0;
 
 			if (index === 0 && startUnix > 0) {
 				record.training_start = startUnix;
@@ -427,7 +424,7 @@ async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 		throw new Error('No overview skills are available to share yet.');
 	}
 	const encodedSkills = await encodeShareSkillsPayload(recordArray);
-	const shareContext = await getCharacterShareContext(characterId);
+	const shareContext = await getCharacterShareContext(characterId, { cacheOnly: true });
 	const encodedTotalSP = encodeCompactInt(totalSP);
 	const balanceCents = Math.max(0, Math.round(Number(character?.balance || 0) * 100));
 	const encodedBalance = encodeCompactInt(balanceCents);
@@ -477,7 +474,27 @@ function findCurrentCorporationHistoryEntry(historyRows, corporationId) {
 		})[0] || null;
 }
 
-async function getCharacterShareContext(characterId) {
+async function getCharacterShareContext(characterId, options = {}) {
+	const cacheOnly = options?.cacheOnly === true;
+	const cachedCommon = await cacheGetCharacterData(`common:${characterId}`);
+	if (cachedCommon?.character?.corporation_id && cachedCommon?.corporationJoinDate) {
+		return {
+			character: {
+				character_id: String(characterId),
+				name: cachedCommon.character?.name || `Character ${characterId}`,
+				corporation_id: Number(cachedCommon.character?.corporation_id || 0),
+				alliance_id: Number(cachedCommon.character?.alliance_id || 0) || null,
+				balance: Number(cachedCommon.character?.balance || 0)
+			},
+			corporation: cachedCommon.corporation || null,
+			alliance: cachedCommon.alliance || null,
+			corporationJoinDate: String(cachedCommon.corporationJoinDate || '')
+		};
+	}
+	if (cacheOnly) {
+		throw new Error('Share data is still loading in the background.');
+	}
+
 	const [charInfo, history] = await Promise.all([
 		window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}`),
 		window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}/corporationhistory`)
@@ -1193,8 +1210,6 @@ async function renderCharacterPage(charName, tab = 'overview') {
 	document.getElementById('about').classList.add('d-none');
 	document.getElementById('skillq').classList.remove('d-none');
 	startCountdowns();
-
-	refreshCharacterPageInBackground(characterId, activeTab);
 }
 
 function buildCharacterInfoSignature(data) {
@@ -1570,13 +1585,9 @@ async function renderItemPage(itemId) {
 	let typeInfo = null;
 	let groupInfo = null;
 	try {
-		typeInfo = await window.esi.doJsonRequest(`${ESI_BASE}/universe/types/${parsedItemId}?language=en`);
+		typeInfo = await getTypeInfo(parsedItemId);
 	} catch (_) {
-		try {
-			typeInfo = await getTypeInfo(parsedItemId);
-		} catch (_) {
-			typeInfo = null;
-		}
+		typeInfo = null;
 	}
 
 	try {
@@ -2266,13 +2277,31 @@ function initBackgroundRefresh() {
 
 async function refreshCharacterSummariesInBackground() {
 	try {
-		characters = await window.esi.getLoggedInCharacters();
-		for (const char of characters) {
-			refreshCharacterSummaryInBackground(String(char.character_id), char.name);
+		const shouldPreloadPageData = await shouldRunScheduledRefresh();
+		const characters = await window.esi.getLoggedInCharacters();
+		await Promise.all(characters.map(async (char) => {
+			const characterId = String(char.character_id);
+			await refreshCharacterSummaryInBackground(characterId, char.name);
+			if (shouldPreloadPageData || await isCharacterPageDataMissing(characterId)) {
+				await refreshCharacterPageInBackground(characterId);
+			}
+		}));
+		if (shouldPreloadPageData) {
+			await cacheSetCharacterData(LAST_BACKGROUND_REFRESH_KEY, { updatedAt: Date.now() });
 		}
 	} finally {
 		setTimeout(refreshCharacterSummariesInBackground, 15000);
 	}
+}
+
+async function isCharacterPageDataMissing(characterId) {
+	const [common, wallet, train, overview] = await Promise.all([
+		cacheGetCharacterData(`common:${characterId}`),
+		cacheGetCharacterData(`wallet:${characterId}`),
+		cacheGetCharacterData(`train:${characterId}`),
+		cacheGetCharacterData(`overview:${characterId}`)
+	]);
+	return !common || !wallet || !train || !overview;
 }
 
 async function refreshCharacterSummaryInBackground(characterId, characterName) {
@@ -2342,14 +2371,19 @@ async function refreshCharacterPageInBackground(characterId, tab) {
 	const missingTrainingLevel = Boolean(cachedCommon?.training?.typeName)
 		&& !Number(cachedCommon?.training?.level || 0);
 	const finishedTraining = hasTrainingCompleted(cachedCommon?.training);
-	if (!(await shouldRefreshCharacterData(commonKey)) && !missingTrainingLevel && !finishedTraining) {
-		if (tab === 'wallet' && !(await shouldRefreshCharacterData(`wallet:${characterId}`))) return;
-		if (tab === 'train' && !(await shouldRefreshCharacterData(`train:${characterId}`))) return;
-		if (tab === 'overview' && !(await shouldRefreshCharacterData(`overview:${characterId}`))) return;
+	const shouldRefreshCommon = await shouldRefreshCharacterData(commonKey);
+	const shouldRefreshWallet = await shouldRefreshCharacterData(`wallet:${characterId}`);
+	const shouldRefreshTrain = await shouldRefreshCharacterData(`train:${characterId}`);
+	const shouldRefreshOverview = await shouldRefreshCharacterData(`overview:${characterId}`);
+	if (!shouldRefreshCommon && !missingTrainingLevel && !finishedTraining) {
+		if (tab === 'wallet' && !shouldRefreshWallet) return;
+		if (tab === 'train' && !shouldRefreshTrain) return;
+		if (tab === 'overview' && !shouldRefreshOverview) return;
+		if (tab == null && !shouldRefreshWallet && !shouldRefreshTrain && !shouldRefreshOverview) return;
 	}
 
 	try {
-		if (missingTrainingLevel || finishedTraining || (await shouldRefreshCharacterData(commonKey))) {
+		if (missingTrainingLevel || finishedTraining || shouldRefreshCommon) {
 			const common = await fetchCharacterCommonData(characterId);
 			common.message = null;
 			common.updatedAt = Date.now();
@@ -2357,7 +2391,7 @@ async function refreshCharacterPageInBackground(characterId, tab) {
 		}
 
 		if (tab === 'wallet') {
-			if (!(await shouldRefreshCharacterData(`wallet:${characterId}`))) return;
+			if (!shouldRefreshWallet) return;
 			const wallet = await fetchWalletRows(characterId);
 			await cacheSetCharacterData(`wallet:${characterId}`, { rows: wallet, updatedAt: Date.now() })
 				|| await cacheTouchCharacterData(`wallet:${characterId}`);
@@ -2365,7 +2399,7 @@ async function refreshCharacterPageInBackground(characterId, tab) {
 		}
 
 		if (tab === 'train') {
-			if (!(await shouldRefreshCharacterData(`train:${characterId}`))) return;
+			if (!shouldRefreshTrain) return;
 			const train = await fetchTrainingSuggestions(characterId);
 			train.updatedAt = Date.now();
 			await cacheSetCharacterData(`train:${characterId}`, train)
@@ -2373,7 +2407,29 @@ async function refreshCharacterPageInBackground(characterId, tab) {
 			return;
 		}
 
-		if (!(await shouldRefreshCharacterData(`overview:${characterId}`))) return;
+		if (tab === 'overview') {
+			if (!shouldRefreshOverview) return;
+			const overview = await fetchSkillsOverview(characterId);
+			overview.updatedAt = Date.now();
+			await cacheSetCharacterData(`overview:${characterId}`, overview)
+				|| await cacheTouchCharacterData(`overview:${characterId}`);
+			return;
+		}
+
+		if (shouldRefreshWallet) {
+			const wallet = await fetchWalletRows(characterId);
+			await cacheSetCharacterData(`wallet:${characterId}`, { rows: wallet, updatedAt: Date.now() })
+				|| await cacheTouchCharacterData(`wallet:${characterId}`);
+		}
+
+		if (shouldRefreshTrain) {
+			const train = await fetchTrainingSuggestions(characterId);
+			train.updatedAt = Date.now();
+			await cacheSetCharacterData(`train:${characterId}`, train)
+				|| await cacheTouchCharacterData(`train:${characterId}`);
+		}
+
+		if (!shouldRefreshOverview) return;
 		const overview = await fetchSkillsOverview(characterId);
 		overview.updatedAt = Date.now();
 		await cacheSetCharacterData(`overview:${characterId}`, overview)
@@ -2473,10 +2529,11 @@ async function shouldRefreshCharacterData(key) {
 }
 
 async function fetchCharacterCommonData(characterId) {
-	const [charInfo, balance, queue] = await Promise.all([
+	const [charInfo, balance, queue, history] = await Promise.all([
 		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}`, 'GET', null, null, characterId),
 		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet`, 'GET', null, null, characterId),
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId).catch(() => [])
+		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId).catch(() => []),
+		window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}/corporationhistory`).catch(() => [])
 	]);
 
 	const [corporation, alliance] = await Promise.all([
@@ -2485,6 +2542,8 @@ async function fetchCharacterCommonData(characterId) {
 	]);
 
 	let training = null;
+	const currentCorpHistory = findCurrentCorporationHistoryEntry(history, charInfo?.corporation_id);
+	const corporationJoinDate = currentCorpHistory?.start_date || currentCorpHistory?.record_start_date || '';
 	if (Array.isArray(queue) && queue.length > 0) {
 		const active = pickCurrentOrNextQueueRow(queue);
 		if (active) {
@@ -2509,6 +2568,7 @@ async function fetchCharacterCommonData(characterId) {
 		},
 		corporation: corporation ? { corporation_id: charInfo.corporation_id, name: corporation.name } : null,
 		alliance: alliance ? { alliance_id: charInfo.alliance_id, name: alliance.name } : null,
+		corporationJoinDate,
 		training,
 		message: null
 	};
