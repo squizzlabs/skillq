@@ -189,6 +189,9 @@ class SimpleESI {
 			await this.store.set(`simpleesi-global-whoami-${this.whoami.character_id}`, JSON.stringify(this.whoami));
 			await this.lsSet('whoami', this.whoami);
 			await this.lsSet('authed_json', json, this.whoami.character_id);
+			if (json.expires_in) {
+				await this.lsSet('access_token', json.access_token, this.whoami.character_id, 1000 * (json.expires_in - 2));
+			}
 			await this.store.delete('simpleesi-global-loggedout');
 			await this.store.delete('simpleesi-global-state');
 			await this.store.delete('simpleesi-global-code_verifier');
@@ -316,7 +319,8 @@ class SimpleESI {
 
 	async doAuthRequest(url, method = 'GET', headers = null, body = null, character_id = this.whoami?.character_id) {
 		if (headers === null) headers = {};
-		headers.Authorization = await this.getAccessToken(character_id);
+		const accessToken = await this.getAccessToken(character_id);
+		headers.Authorization = accessToken.startsWith('Bearer ') ? accessToken : `Bearer ${accessToken}`;
 		headers.Accept = 'application/json';
 		return await this.doRequest(url, method, headers, body);
 	}
@@ -571,6 +575,13 @@ class SimpleESI {
 					return this.authLogout();
 				}
 
+				current_access_token = json.access_token;
+				const nextAuthedJson = {
+					...authed_json,
+					...json,
+					refresh_token: json.refresh_token || authed_json.refresh_token
+				};
+				await this.lsSet('authed_json', nextAuthedJson, character_id);
 				await this.lsSet('access_token', json.access_token, character_id, 1000 * (json.expires_in - 2));
 			}
 			return current_access_token;
