@@ -21,6 +21,20 @@ SkillQ lets you monitor all your EVE Online characters in one place from any bro
 - **Dark / light / system theme**: choose your preferred colour scheme from Settings
 - **Restricted or fluid layout**: fixed three-column card layout or fluid full-width mode
 
+### Shares
+
+SkillQ can generate a signed snapshot link from a character overview page.
+
+> **Important share caveats**
+>
+> - **Snapshot-based**: the share represents one point in time, not a live feed.
+> - **Queue cap**: only the first 25 queue entries are included in the share payload.
+> - **Completed queue rows are hidden from the queue table** on shared pages.
+> - **Completed queue progress is folded into Shared Skills levels** (example: if snapshot shows III but queued IV has already finished by view time, Shared Skills shows IV as completed).
+> - **Expiry**: shares expire after 30 days.
+> - **Corporation binding**: shares invalidate if the character changes corporations.
+> - **Tampering warning**: URL data can be edited by a user, so treat shared data as informational.
+
 Here are some example screenshots:
 
 ![Dashboard](./img/skillq_dash.png)
