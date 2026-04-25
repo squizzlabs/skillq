@@ -2493,7 +2493,11 @@ function initCacheAutoRender() {
 	if (cacheAutoRenderInitialized) return;
 	cacheAutoRenderInitialized = true;
 
-	window.addEventListener(CHARACTER_DATA_UPDATED_EVENT, () => {
+	window.addEventListener(CHARACTER_DATA_UPDATED_EVENT, (event) => {
+		const key = String(event?.detail?.key || '');
+		if (!shouldRerenderCurrentRouteForKey(key)) {
+			return;
+		}
 		scheduleRouteRerender();
 	});
 
@@ -2510,6 +2514,32 @@ function initCacheAutoRender() {
 			}));
 		});
 	}
+}
+
+function shouldRerenderCurrentRouteForKey(key) {
+	if (!key || key === LAST_BACKGROUND_REFRESH_KEY) return false;
+
+	const route = parseRoute(window.location.pathname);
+	if (route.name === 'home' || route.name === 'manage') {
+		return key.startsWith('summary:');
+	}
+
+	if (route.name === 'char') {
+		const renderedCharacterId = document.querySelector('#char-view-root .sq-char-view[data-character-id]')?.dataset?.characterId
+			|| String(window.esi?.whoami?.character_id || '');
+		if (!renderedCharacterId) return true;
+		return key.startsWith(`summary:${renderedCharacterId}`)
+			|| key.startsWith(`common:${renderedCharacterId}`)
+			|| key.startsWith(`overview:${renderedCharacterId}`)
+			|| key.startsWith(`wallet:${renderedCharacterId}`)
+			|| key.startsWith(`train:${renderedCharacterId}`);
+	}
+
+	if (route.name === 'settings' || route.name === 'readme' || route.name === 'share' || route.name === 'item') {
+		return false;
+	}
+
+	return true;
 }
 
 function scheduleRouteRerender() {
