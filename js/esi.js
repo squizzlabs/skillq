@@ -28,6 +28,10 @@ if (window.location.hostname === '127.0.0.1') {
 				loginURL: '/login',
 				authURL: '/auth',
 				logoutURL: '/logout',
+				postAuthRedirect: (whoami) => {
+					const characterName = encodeURIComponent(whoami?.name || `${whoami?.character_id || ''}`);
+					return characterName ? `/char/${characterName}` : '/';
+				},
 				callbackUrl,
 				scopes: [
 					"publicData",

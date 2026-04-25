@@ -24,6 +24,9 @@
 - `logoutURL`  
   The logout URL. Will execute `authLogout`.
 
+- `postAuthRedirect`  
+	Redirect target after successful auth. Can be a string URL/path or a function `(whoami) => string`.
+
 - `esiInFlightHandler`  
   A custom function that will be called when a ESI call is started and completed, it will be passed the total number of inflight calls count
 
@@ -55,6 +58,7 @@ class SimpleESI {
 		this.ssoClientId = this.getOption('clientID');
 		this.callbackUrl = this.getOption('callbackUrl');
 		this.scopesArray = this.getOption('scopes');
+		this.postAuthRedirect = this.getOption('postAuthRedirect', '/');
 		this.esiInFlightHandler = this.getOption('esiInFlightHandler', this.noop);
 		this.esiIssueHandler = this.getOption('esiIssueHandler', this.noop);
 		this.logger = this.getOption('logger', console.log);
@@ -197,7 +201,10 @@ class SimpleESI {
 			await this.store.delete('simpleesi-global-code_verifier');
 			await this.store.delete('simpleesi-global-code_challenge');
 
-			window.location = '/';
+			const redirectTarget = typeof this.postAuthRedirect === 'function'
+				? this.postAuthRedirect(this.whoami)
+				: this.postAuthRedirect;
+			window.location = redirectTarget || '/';
 		} catch (err) {
 			this.errorlogger('Authentication callback error:', err);
 			return this.authBegin();
