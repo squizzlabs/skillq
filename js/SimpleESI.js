@@ -390,19 +390,6 @@ class SimpleESI {
 				res = await fetch(url, params);
 				if (res.status >= 500) this.esiIssueHandler(res);
 
-				// Cache ETag and Last-Modified headers for future conditional requests
-				if (method === 'GET' && res.ok) {
-					try {
-						const etag = getHeader(res, 'etag');
-						const lastModified = getHeader(res, 'last-modified');
-						if (etag || lastModified) {
-							await this.lsSet(cacheKey, { etag, lastModified }, true);
-						}
-					} catch (err) {
-						// Ignore cache storage errors
-					}
-				}
-
 				// Handle 304 Not Modified - return cached data
 				if (res.status === 304 && cachedData && cachedData.data) {
 					// Create a synthetic response from cached data
