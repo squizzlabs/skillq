@@ -188,7 +188,7 @@ class SimpleESI {
 			await this.store.set('simpleesi-global-whoami', JSON.stringify(this.whoami));
 			await this.store.set(`simpleesi-global-whoami-${this.whoami.character_id}`, JSON.stringify(this.whoami));
 			await this.lsSet('whoami', this.whoami);
-			await this.lsSet('authed_json', json);
+			await this.lsSet('authed_json', json, this.whoami.character_id);
 			await this.store.delete('simpleesi-global-loggedout');
 			await this.store.delete('simpleesi-global-state');
 			await this.store.delete('simpleesi-global-code_verifier');
@@ -560,9 +560,9 @@ class SimpleESI {
 			this._locks[lockKey] = true;
 
 			if (await this.lsGet('access_token', character_id) === 'undefined') await this.lsDel('access_token', character_id);
-			let access_token_expires = parseInt(await this.lsGet('access_token_expires', character_id) || '0');
-			if (access_token_expires < Date.now() || await this.lsGet('access_token', character_id) === null) {
-				let authed_json = await this.lsGet('authed_json');
+			let current_access_token = await this.lsGet('access_token', character_id);
+			if (current_access_token === null) {
+				let authed_json = await this.lsGet('authed_json', character_id);
 				if (authed_json === null) return this.authLogout();
 				const body = {
 					grant_type: 'refresh_token',
@@ -584,10 +584,9 @@ class SimpleESI {
 					return this.authLogout();
 				}
 
-				await this.lsSet('access_token', json.access_token, character_id);
-				await this.lsSet('access_token_expires', Date.now() + (1000 * (json.expires_in - 2)), character_id);
+				await this.lsSet('access_token', json.access_token, character_id, 1000 * (json.expires_in - 2));
 			}
-			return await this.lsGet('access_token', character_id);
+			return current_access_token;
 		} finally {
 			this._locks[lockKey] = false;
 		}

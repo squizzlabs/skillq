@@ -59,8 +59,6 @@ async function main() {
 
 			initCacheAutoRender();
 			initSpaNavigation();
-			initBackgroundCharacterRefresh();
-			primeCharacterCachesOnStartup();
 		}
 	} catch (err) {
 		console.error('Error in main():', err);
@@ -162,6 +160,7 @@ async function handleRoute() {
 	}
 
 	if (route.name === 'char') {
+		initBackgroundRefresh();
 		await renderCharacterPage(route.charName, route.tab);
 		return true;
 	}
@@ -185,6 +184,7 @@ async function handleRoute() {
 		return true;
 	}
 
+	initBackgroundRefresh();
 	await renderLoggedInHome();
 	return true;
 }
@@ -1060,8 +1060,6 @@ async function renderLoggedInHome() {
 			training: summary.training
 		}));
 	}
-
-	refreshCharacterSummariesInBackground(characters);
 
 	const netSummary = document.getElementById('net-summary');
 	if (orderedSummaries.length > 1) {
@@ -2258,9 +2256,22 @@ async function loadCharacterPageDataFromCache(characterId, tab) {
 	return data;
 }
 
-async function refreshCharacterSummariesInBackground(characters) {
-	for (const char of characters) {
-		refreshCharacterSummaryInBackground(String(char.character_id), char.name);
+function initBackgroundRefresh() {
+	if (backgroundRefreshInitialized) return;
+	backgroundRefreshInitialized = true;
+
+	console.log('Initializing background character summary refresh');
+	refreshCharacterSummariesInBackground();
+}	
+
+async function refreshCharacterSummariesInBackground() {
+	try {
+		characters = await window.esi.getLoggedInCharacters();
+		for (const char of characters) {
+			refreshCharacterSummaryInBackground(String(char.character_id), char.name);
+		}
+	} finally {
+		setTimeout(refreshCharacterSummariesInBackground, 15000);
 	}
 }
 
@@ -2274,12 +2285,26 @@ async function refreshCharacterSummaryInBackground(characterId, characterName) {
 		return;
 	}
 
+	console.log('Refreshing background summary for', characterName);
 	try {
-		const [balance, skills, queue] = await Promise.all([
+		const [balance, skills, queue, attr, implants, char] = await Promise.all([
 			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet`, 'GET', null, null, characterId),
 			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId),
-			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId)
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId),
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/attributes`, 'GET', null, null, characterId),
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/implants`, 'GET', null, null, characterId),
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}`, 'GET', null, null)
 		]);
+		const corporationId = char?.corporation_id ? String(char.corporation_id) : null;
+		const allianceId = char?.alliance_id ? String(char.alliance_id) : null;
+		if (corporationId) {
+			const corporation = await getCorporationInfo(corporationId);
+			char.corporation_name = corporation?.name || null;
+		}
+		if (allianceId) {
+			const alliance = await getAllianceInfo(allianceId);
+			char.alliance_name = alliance?.name || null;
+		}
 
 		let training = null;
 		if (Array.isArray(queue) && queue.length > 0) {
@@ -2358,16 +2383,6 @@ async function refreshCharacterPageInBackground(characterId, tab) {
 	}
 }
 
-function initBackgroundCharacterRefresh() {
-	if (backgroundRefreshInitialized) return;
-	backgroundRefreshInitialized = true;
-
-	triggerScheduledBackgroundRefresh();
-	setInterval(() => {
-		triggerScheduledBackgroundRefresh();
-	}, BACKGROUND_REFRESH_INTERVAL_MS);
-}
-
 async function initLayoutMode() {
 	const saved = await lookupCacheGet(LAYOUT_MODE_KEY);
 	const mode = saved?.mode === 'full' ? 'full' : 'restricted';
@@ -2443,63 +2458,6 @@ function scheduleRouteRerender() {
 		if (window.location.pathname === '/auth') return;
 		handleRoute();
 	}, 120);
-}
-
-async function triggerScheduledBackgroundRefresh() {
-	if (!(await shouldRunScheduledRefresh())) {
-		return;
-	}
-	await refreshAllCharactersInBackground();
-	await cacheSetCharacterData(LAST_BACKGROUND_REFRESH_KEY, { updatedAt: Date.now() }, null);
-}
-
-async function refreshAllCharactersInBackground() {
-	try {
-		if (!window.esi?.whoami) return;
-		console.log('Running scheduled background character data refresh');
-
-		const characters = await window.esi.getLoggedInCharacters();
-		const tasks = [];
-		for (const char of characters) {
-			const characterId = String(char.character_id);
-			tasks.push(refreshCharacterSummaryInBackground(characterId, char.name));
-			tasks.push(refreshCharacterPageInBackground(characterId, 'overview'));
-			tasks.push(refreshCharacterPageInBackground(characterId, 'wallet'));
-			tasks.push(refreshCharacterPageInBackground(characterId, 'train'));
-		}
-		await Promise.allSettled(tasks);
-	} catch (err) {
-		console.warn('Background character refresh scheduler failed', err);
-	}
-}
-
-async function primeCharacterCachesOnStartup() {
-	if (!window.esi?.whoami) return;
-
-	try {
-		const characters = await window.esi.getLoggedInCharacters();
-		const tasks = [];
-		for (const char of characters) {
-			const characterId = String(char.character_id);
-			const [summaryCached, commonCached] = await Promise.all([
-				cacheGetCharacterData(`summary:${characterId}`),
-				cacheGetCharacterData(`common:${characterId}`)
-			]);
-
-			if (!summaryCached) {
-				tasks.push(refreshCharacterSummaryInBackground(characterId, char.name));
-			}
-			if (!commonCached) {
-				tasks.push(refreshCharacterPageInBackground(characterId, 'overview'));
-			}
-		}
-
-		if (tasks.length > 0) {
-			await Promise.allSettled(tasks);
-		}
-	} catch (err) {
-		console.warn('Initial character cache priming failed', err);
-	}
 }
 
 async function shouldRunScheduledRefresh() {
