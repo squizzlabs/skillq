@@ -373,6 +373,32 @@ a:hover { color: var(--link-hover); text-decoration: underline; }
 .sq-section-title { margin: 1rem 0 0.5rem; font-size: 1rem; }
 .sq-section-title small { font-size: 0.8em; font-weight: 400; color: var(--muted); margin-left: 0.4em; }
 
+/* ── Toast ── */
+.sq-toast {
+	position: fixed;
+	left: 50%;
+	bottom: 1rem;
+	transform: translate(-50%, 0.6rem);
+	padding: 0.55rem 0.85rem;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--card) 86%, #000 14%);
+	border: 1px solid var(--border);
+	color: var(--fg);
+	font-size: 0.85rem;
+	box-shadow: 0 8px 18px rgba(0, 0, 0, 0.3);
+	opacity: 0;
+	pointer-events: none;
+	z-index: 1200;
+	transition: opacity 140ms ease, transform 140ms ease;
+	max-width: calc(100vw - 2rem);
+	text-align: center;
+}
+
+.sq-toast--show {
+	opacity: 1;
+	transform: translate(-50%, 0);
+}
+
 /* ── Buttons ── */
 .sq-btn {
 display: inline-flex;

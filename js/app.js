@@ -336,9 +336,11 @@ function renderCharacterShareControls({ character, skills = [], totalSP = 0, las
 			if (navigator.clipboard?.writeText) {
 				await navigator.clipboard.writeText(url);
 				button.title = 'Share link copied';
+				showToast('Share link copied to clipboard.', button);
 			} else {
 				window.prompt('Copy share URL', url);
 				button.title = 'Share link ready to copy';
+				showToast('Share link ready to copy.', button);
 			}
 		} catch (err) {
 			button.title = err?.message || 'Unable to build share link.';
@@ -363,6 +365,42 @@ function renderCharacterShareControls({ character, skills = [], totalSP = 0, las
 	return button;
 }
 
+let toastHideTimer = null;
+function showToast(message, anchorEl = null) {
+	const text = String(message || '').trim();
+	if (!text) return;
+
+	let toast = document.getElementById('sq-toast');
+	if (!toast) {
+		toast = document.createElement('div');
+		toast.id = 'sq-toast';
+		toast.className = 'sq-toast';
+		toast.setAttribute('role', 'status');
+		toast.setAttribute('aria-live', 'polite');
+		document.body.appendChild(toast);
+	}
+
+	toast.textContent = text;
+
+	if (anchorEl && typeof anchorEl.getBoundingClientRect === 'function') {
+		const rect = anchorEl.getBoundingClientRect();
+		toast.style.bottom = 'auto';
+		toast.style.top = `${Math.max(8, Math.round(rect.bottom + 8))}px`;
+		toast.style.left = `${Math.round(rect.left + (rect.width / 2))}px`;
+	} else {
+		toast.style.top = 'auto';
+		toast.style.bottom = '1rem';
+		toast.style.left = '50%';
+	}
+
+	toast.classList.add('sq-toast--show');
+
+	if (toastHideTimer) clearTimeout(toastHideTimer);
+	toastHideTimer = setTimeout(() => {
+		toast.classList.remove('sq-toast--show');
+	}, 1800);
+}
+
 async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 	if (typeof SkillUrlCodecSafe === 'undefined') {
 		throw new Error('Share codec is not available.');
@@ -372,7 +410,7 @@ async function buildCharacterShareUrl(character, skills, totalSP = 0) {
 		throw new Error('Character information is missing.');
 	}
 	const overviewCached = await cacheGetCharacterData(`overview:${characterId}`);
-	const queue = Array.isArray(overviewCached?.queue) ? overviewCached.queue : [];
+	const queue = Array.isArray(overviewCached?.queue) ? overviewCached.queue.slice(0, 25) : [];
 
 	// Encode each trained skill as a base record (current level, no timing)
 	const trainedRecords = (skills || [])
@@ -940,7 +978,7 @@ async function renderSharedCharacterPage() {
 			<ul>
 				<li>${snapshotText}</li>
 				<li>Only first 25 skills in skill queue are shown.</li>
-				<li>This link will automatically invalidate if the character changes corporations.</li>
+				<li>Share links invalidate if the character changes corporations.</li>
 				<li>Share links expire after 30 days.</li>
 				<li>A crafty person <em>could</em> tamper with the URL to share fake character data.</li>
 			</ul>
