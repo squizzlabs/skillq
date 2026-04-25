@@ -2684,114 +2684,134 @@ async function shouldRefreshCharacterData(key) {
 }
 
 async function fetchCharacterCommonData(characterId) {
-	const [charInfo, balance, queue, history] = await Promise.all([
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}`, 'GET', null, null, characterId),
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet`, 'GET', null, null, characterId),
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId).catch(() => []),
-		window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}/corporationhistory`).catch(() => [])
-	]);
+	try {
+		const [charInfo, balance, queue, history] = await Promise.all([
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}`, 'GET', null, null, characterId),
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet`, 'GET', null, null, characterId),
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId).catch(() => []),
+			window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}/corporationhistory`).catch(() => [])
+		]);
 
-	const [corporation, alliance] = await Promise.all([
-		charInfo?.corporation_id ? getCorporationInfo(charInfo.corporation_id) : null,
-		charInfo?.alliance_id ? getAllianceInfo(charInfo.alliance_id) : null
-	]);
+		const [corporation, alliance] = await Promise.all([
+			charInfo?.corporation_id ? getCorporationInfo(charInfo.corporation_id) : null,
+			charInfo?.alliance_id ? getAllianceInfo(charInfo.alliance_id) : null
+		]);
 
-	let training = null;
-	const currentCorpHistory = findCurrentCorporationHistoryEntry(history, charInfo?.corporation_id);
-	const corporationJoinDate = currentCorpHistory?.start_date || currentCorpHistory?.record_start_date || '';
-	if (Array.isArray(queue) && queue.length > 0) {
-		const active = pickCurrentOrNextQueueRow(queue);
-		if (active) {
-			const queueEmptyMs = Math.max(0, ...queue.map((row) => (row?.finish_date ? (Date.parse(row.finish_date) || 0) : 0)));
-			const typeInfo = await getTypeInfo(active.skill_id);
-			training = {
-				typeName: typeInfo?.name || `Skill ${active.skill_id}`,
-				level: Number(active.finished_level || 0),
-				trainingEndMs: active.finish_date ? Date.parse(active.finish_date) : 0,
-				queueEmptyMs
-			};
+		let training = null;
+		const currentCorpHistory = findCurrentCorporationHistoryEntry(history, charInfo?.corporation_id);
+		const corporationJoinDate = currentCorpHistory?.start_date || currentCorpHistory?.record_start_date || '';
+		if (Array.isArray(queue) && queue.length > 0) {
+			const active = pickCurrentOrNextQueueRow(queue);
+			if (active) {
+				const queueEmptyMs = Math.max(0, ...queue.map((row) => (row?.finish_date ? (Date.parse(row.finish_date) || 0) : 0)));
+				const typeInfo = await getTypeInfo(active.skill_id);
+				training = {
+					typeName: typeInfo?.name || `Skill ${active.skill_id}`,
+					level: Number(active.finished_level || 0),
+					trainingEndMs: active.finish_date ? Date.parse(active.finish_date) : 0,
+					queueEmptyMs
+				};
+			}
 		}
-	}
 
-	return {
-		character: {
-			character_id: characterId,
-			name: charInfo?.name || window.esi.whoami.name,
-			corporation_id: charInfo?.corporation_id || null,
-			alliance_id: charInfo?.alliance_id || null,
-			balance: Number(balance || 0)
-		},
-		corporation: corporation ? { corporation_id: charInfo.corporation_id, name: corporation.name } : null,
-		alliance: alliance ? { alliance_id: charInfo.alliance_id, name: alliance.name } : null,
-		corporationJoinDate,
-		training,
-		message: null
-	};
+		return {
+			character: {
+				character_id: characterId,
+				name: charInfo?.name || window.esi.whoami.name,
+				corporation_id: charInfo?.corporation_id || null,
+				alliance_id: charInfo?.alliance_id || null,
+				balance: Number(balance || 0)
+			},
+			corporation: corporation ? { corporation_id: charInfo.corporation_id, name: corporation.name } : null,
+			alliance: alliance ? { alliance_id: charInfo.alliance_id, name: alliance.name } : null,
+			corporationJoinDate,
+			training,
+			message: null
+		};
+	} catch (err) {
+		// If fetch fails, return cached data so users see stale data instead of nothing
+		console.warn(`Failed to fetch fresh character common data for ${characterId}, using cache:`, err);
+		const cached = await cacheGetCharacterData(`common:${characterId}`);
+		if (cached) {
+			return cached;
+		}
+		throw err; // Re-throw if no cache available
+	}
 }
 
 async function fetchSkillsOverview(characterId) {
-	const [skillsResponse, queueResponse] = await Promise.all([
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId),
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId).catch(() => [])
-	]);
+	try {
+		const [skillsResponse, queueResponse] = await Promise.all([
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId),
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId).catch(() => [])
+		]);
 
-	const skills = skillsResponse?.skills || [];
-	const queue = Array.isArray(queueResponse) ? queueResponse : [];
-	const skillIds = Array.from(new Set([...skills.map((s) => s.skill_id), ...queue.map((q) => q.skill_id)].filter(Boolean)));
-	const typeInfos = new Map(await Promise.all(skillIds.map(async (skillId) => [skillId, await getTypeInfo(skillId)])));
-	const groupIds = Array.from(new Set(Array.from(typeInfos.values()).map((info) => info?.group_id).filter(Boolean)));
-	const groupInfos = new Map(await Promise.all(groupIds.map(async (groupId) => [groupId, await getGroupInfo(groupId)])));
+		const skills = skillsResponse?.skills || [];
+		const queue = Array.isArray(queueResponse) ? queueResponse : [];
+		const skillIds = Array.from(new Set([...skills.map((s) => s.skill_id), ...queue.map((q) => q.skill_id)].filter(Boolean)));
+		const typeInfos = new Map(await Promise.all(skillIds.map(async (skillId) => [skillId, await getTypeInfo(skillId)])));
+		const groupIds = Array.from(new Set(Array.from(typeInfos.values()).map((info) => info?.group_id).filter(Boolean)));
+		const groupInfos = new Map(await Promise.all(groupIds.map(async (groupId) => [groupId, await getGroupInfo(groupId)])));
 
-	const queueRows = queue.map((row) => {
-		const typeInfo = typeInfos.get(row.skill_id);
-		const groupInfo = groupInfos.get(typeInfo?.group_id);
+		const queueRows = queue.map((row) => {
+			const typeInfo = typeInfos.get(row.skill_id);
+			const groupInfo = groupInfos.get(typeInfo?.group_id);
+			return {
+				typeName: typeInfo?.name || `Skill ${row.skill_id}`,
+				typeID: row.skill_id,
+				groupName: groupInfo?.name || '',
+				level: Number(row.finished_level || 0),
+				startDate: row.start_date || null,
+				endDate: row.finish_date || null,
+				spHour: calculateSpPerHour(row)
+			};
+		});
+
+		const maxQueuedLevels = new Map();
+		const activeQueueRow = pickCurrentOrNextQueueRow(queue);
+		const activeTrainingSkillId = Number(activeQueueRow?.skill_id || 0);
+		const activeTrainingStartMs = activeQueueRow?.start_date ? Date.parse(activeQueueRow.start_date) : 0;
+		const activeTrainingEndMs = activeQueueRow?.finish_date ? Date.parse(activeQueueRow.finish_date) : 0;
+		for (const row of queue) {
+			const existing = maxQueuedLevels.get(row.skill_id) || 0;
+			maxQueuedLevels.set(row.skill_id, Math.max(existing, Number(row.finished_level || 0)));
+		}
+
+		const skillRows = skills.map((row) => {
+			const typeInfo = typeInfos.get(row.skill_id);
+			const groupInfo = groupInfos.get(typeInfo?.group_id);
+			const activeQueue = queue.find((q) => q.skill_id === row.skill_id);
+			const isCurrentlyTraining = Number(row.skill_id || 0) === activeTrainingSkillId && activeTrainingEndMs > Date.now();
+			return {
+				typeName: typeInfo?.name || `Skill ${row.skill_id}`,
+				typeID: row.skill_id,
+				groupName: groupInfo?.name || '',
+				groupID: typeInfo?.group_id || 0,
+				skillPoints: Number(row.skillpoints_in_skill || 0),
+				level: Number(row.trained_skill_level ?? row.active_skill_level ?? 0),
+				training: activeQueue ? Number(activeQueue.finished_level || 0) : 0,
+				queue: maxQueuedLevels.get(row.skill_id) || 0,
+				isCurrentlyTraining,
+				trainingStartMs: isCurrentlyTraining ? (activeTrainingStartMs || 0) : 0,
+				trainingEndMs: isCurrentlyTraining ? (activeTrainingEndMs || 0) : 0
+			};
+		}).sort((a, b) => (a.groupName || '').localeCompare(b.groupName || '') || a.typeName.localeCompare(b.typeName));
+
 		return {
-			typeName: typeInfo?.name || `Skill ${row.skill_id}`,
-			typeID: row.skill_id,
-			groupName: groupInfo?.name || '',
-			level: Number(row.finished_level || 0),
-			startDate: row.start_date || null,
-			endDate: row.finish_date || null,
-			spHour: calculateSpPerHour(row)
+			queue: queueRows,
+			skills: skillRows,
+			totalSP: Number(skillsResponse?.total_sp || 0),
+			unallocatedSP: Number(skillsResponse?.unallocated_sp || 0)
 		};
-	});
-
-	const maxQueuedLevels = new Map();
-	const activeQueueRow = pickCurrentOrNextQueueRow(queue);
-	const activeTrainingSkillId = Number(activeQueueRow?.skill_id || 0);
-	const activeTrainingStartMs = activeQueueRow?.start_date ? Date.parse(activeQueueRow.start_date) : 0;
-	const activeTrainingEndMs = activeQueueRow?.finish_date ? Date.parse(activeQueueRow.finish_date) : 0;
-	for (const row of queue) {
-		const existing = maxQueuedLevels.get(row.skill_id) || 0;
-		maxQueuedLevels.set(row.skill_id, Math.max(existing, Number(row.finished_level || 0)));
+	} catch (err) {
+		// If fetch fails, return cached data so users see stale data instead of nothing
+		console.warn(`Failed to fetch fresh skills overview for ${characterId}, using cache:`, err);
+		const cached = await cacheGetCharacterData(`overview:${characterId}`);
+		if (cached) {
+			return cached;
+		}
+		throw err; // Re-throw if no cache available
 	}
-
-	const skillRows = skills.map((row) => {
-		const typeInfo = typeInfos.get(row.skill_id);
-		const groupInfo = groupInfos.get(typeInfo?.group_id);
-		const activeQueue = queue.find((q) => q.skill_id === row.skill_id);
-		const isCurrentlyTraining = Number(row.skill_id || 0) === activeTrainingSkillId && activeTrainingEndMs > Date.now();
-		return {
-			typeName: typeInfo?.name || `Skill ${row.skill_id}`,
-			typeID: row.skill_id,
-			groupName: groupInfo?.name || '',
-			groupID: typeInfo?.group_id || 0,
-			skillPoints: Number(row.skillpoints_in_skill || 0),
-			level: Number(row.trained_skill_level ?? row.active_skill_level ?? 0),
-			training: activeQueue ? Number(activeQueue.finished_level || 0) : 0,
-			queue: maxQueuedLevels.get(row.skill_id) || 0,
-			isCurrentlyTraining,
-			trainingStartMs: isCurrentlyTraining ? (activeTrainingStartMs || 0) : 0,
-			trainingEndMs: isCurrentlyTraining ? (activeTrainingEndMs || 0) : 0
-		};
-	}).sort((a, b) => (a.groupName || '').localeCompare(b.groupName || '') || a.typeName.localeCompare(b.typeName));
-
-	return {
-		queue: queueRows,
-		skills: skillRows,
-		totalSP: Number(skillsResponse?.total_sp || 0),
-		unallocatedSP: Number(skillsResponse?.unallocated_sp || 0)
-	};
 }
 
 function pickCurrentOrNextQueueRow(queueRows) {
@@ -2860,39 +2880,59 @@ function applyOverviewTrainingToCommonData(data, queueRows) {
 }
 
 async function fetchWalletRows(characterId) {
-	const rows = await window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet/journal?page=1`, 'GET', null, null, characterId).catch(() => []);
-	const ids = Array.from(new Set(rows.flatMap((row) => [row.first_party_id, row.second_party_id]).filter((id) => Number(id) > 0)));
-	const names = await resolveUniverseNames(ids);
+	try {
+		const rows = await window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet/journal?page=1`, 'GET', null, null, characterId).catch(() => []);
+		const ids = Array.from(new Set(rows.flatMap((row) => [row.first_party_id, row.second_party_id]).filter((id) => Number(id) > 0)));
+		const names = await resolveUniverseNames(ids);
 
-	return rows.map((row) => ({
-		dttm: formatDateTime(row.date),
-		refTypeName: humanizeSlug(row.ref_type),
-		ownerName1: names.get(row.first_party_id) || String(row.first_party_id || ''),
-		ownerName2: names.get(row.second_party_id) || String(row.second_party_id || ''),
-		amount: Number(row.amount || 0),
-		balance: Number(row.balance || 0),
-		reason: row.description || ''
-	}));
+		return rows.map((row) => ({
+			dttm: formatDateTime(row.date),
+			refTypeName: humanizeSlug(row.ref_type),
+			ownerName1: names.get(row.first_party_id) || String(row.first_party_id || ''),
+			ownerName2: names.get(row.second_party_id) || String(row.second_party_id || ''),
+			amount: Number(row.amount || 0),
+			balance: Number(row.balance || 0),
+			reason: row.description || ''
+		}));
+	} catch (err) {
+		// If fetch fails, return cached data so users see stale data instead of nothing
+		console.warn(`Failed to fetch fresh wallet rows for ${characterId}, using cache:`, err);
+		const cached = await cacheGetCharacterData(`wallet:${characterId}`);
+		if (cached) {
+			return cached.rows || [];
+		}
+		throw err; // Re-throw if no cache available
+	}
 }
 
 async function fetchTrainingSuggestions(characterId) {
-	const [attributes, implants, skillsResponse] = await Promise.all([
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/attributes`, 'GET', null, null, characterId).catch(() => null),
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/implants`, 'GET', null, null, characterId).catch(() => []),
-		window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId).catch(() => ({ skills: [] }))
-	]);
+	try {
+		const [attributes, implants, skillsResponse] = await Promise.all([
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/attributes`, 'GET', null, null, characterId).catch(() => null),
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/implants`, 'GET', null, null, characterId).catch(() => []),
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId).catch(() => ({ skills: [] }))
+		]);
 
-	const implantInfos = await Promise.all((implants || []).map((typeId) => getTypeInfo(typeId)));
-	const implantByAttribute = buildAttributeImplantMap(implantInfos);
-	const attributeRows = ['charisma', 'intelligence', 'memory', 'perception', 'willpower'].map((attributeName) => ({
-		attributeName,
-		baseValue: Number(attributes?.[attributeName] || 0),
-		bonus: Number(implantByAttribute[attributeName]?.bonus || 0),
-		implantName: implantByAttribute[attributeName]?.implantName || ''
-	})).filter((row) => row.baseValue > 0 || row.implantName);
+		const implantInfos = await Promise.all((implants || []).map((typeId) => getTypeInfo(typeId)));
+		const implantByAttribute = buildAttributeImplantMap(implantInfos);
+		const attributeRows = ['charisma', 'intelligence', 'memory', 'perception', 'willpower'].map((attributeName) => ({
+			attributeName,
+			baseValue: Number(attributes?.[attributeName] || 0),
+			bonus: Number(implantByAttribute[attributeName]?.bonus || 0),
+			implantName: implantByAttribute[attributeName]?.implantName || ''
+		})).filter((row) => row.baseValue > 0 || row.implantName);
 
-	const suggestions = await buildTrainingSuggestions(skillsResponse?.skills || [], attributes);
-	return { implants: attributeRows, suggestions };
+		const suggestions = await buildTrainingSuggestions(skillsResponse?.skills || [], attributes);
+		return { implants: attributeRows, suggestions };
+	} catch (err) {
+		// If fetch fails, return cached data so users see stale data instead of nothing
+		console.warn(`Failed to fetch fresh training suggestions for ${characterId}, using cache:`, err);
+		const cached = await cacheGetCharacterData(`train:${characterId}`);
+		if (cached) {
+			return cached;
+		}
+		throw err; // Re-throw if no cache available
+	}
 }
 
 function buildAttributeImplantMap(implantInfos = []) {
