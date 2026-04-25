@@ -1966,7 +1966,7 @@ function _createItemEnablesSection(itemName, enables) {
 			body.appendChild(_createItemSkillRow({
 				typeID: enabled.typeID,
 				typeName: enabled.typeName,
-				metaText: `Requires ${itemName} ${level}`,
+				metaText: `Requires ${itemName} ` + toRomanNumeral(level),
 				depth: 0
 			}));
 		}
