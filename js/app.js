@@ -2748,6 +2748,8 @@ async function fetchSkillsOverview(characterId) {
 
 		const skills = skillsResponse?.skills || [];
 		const queue = Array.isArray(queueResponse) ? queueResponse : [];
+		const skillSpById = new Map(skills.map((row) => [Number(row.skill_id || 0), Number(row.skillpoints_in_skill || 0)]));
+		const now = Date.now();
 		const skillIds = Array.from(new Set([...skills.map((s) => s.skill_id), ...queue.map((q) => q.skill_id)].filter(Boolean)));
 		const typeInfos = new Map(await Promise.all(skillIds.map(async (skillId) => [skillId, await getTypeInfo(skillId)])));
 		const groupIds = Array.from(new Set(Array.from(typeInfos.values()).map((info) => info?.group_id).filter(Boolean)));
@@ -2756,6 +2758,19 @@ async function fetchSkillsOverview(characterId) {
 		const queueRows = queue.map((row) => {
 			const typeInfo = typeInfos.get(row.skill_id);
 			const groupInfo = groupInfos.get(typeInfo?.group_id);
+			const startSp = Number(row.training_start_sp ?? row.level_start_sp ?? 0);
+			const endSp = Number(row.level_end_sp ?? 0);
+			const startMs = row.start_date ? Date.parse(row.start_date) : 0;
+			const endMs = row.finish_date ? Date.parse(row.finish_date) : 0;
+			const isActive = startMs > 0 && endMs > now && startMs <= now;
+			const currentSp = isActive ? Number(skillSpById.get(Number(row.skill_id || 0)) || startSp) : startSp;
+			const derivedSpNeeded = (() => {
+				const spHour = calculateSpPerHour(row);
+				const effectiveStartMs = Math.max(now, startMs || 0);
+				if (!startMs || !endMs || endMs <= effectiveStartMs || spHour <= 0) return 0;
+				return Math.max(0, Math.ceil(spHour * ((endMs - effectiveStartMs) / 3600000)));
+			})();
+			const spNeeded = endSp > 0 ? Math.max(0, endSp - currentSp) : derivedSpNeeded;
 			return {
 				typeName: typeInfo?.name || `Skill ${row.skill_id}`,
 				typeID: row.skill_id,
@@ -2763,7 +2778,8 @@ async function fetchSkillsOverview(characterId) {
 				level: Number(row.finished_level || 0),
 				startDate: row.start_date || null,
 				endDate: row.finish_date || null,
-				spHour: calculateSpPerHour(row)
+				spHour: calculateSpPerHour(row),
+				spNeeded
 			};
 		});
 

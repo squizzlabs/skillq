@@ -446,6 +446,14 @@ vertical-align: top;
 .sq-pip--queued   { background: var(--pip-queued);   border-color: var(--pip-queued); }
 .sq-skill-pip-cell { width: 70px; white-space: nowrap; }
 .sq-skill-sp { font-size: 0.75em; color: var(--muted); margin-left: 0.3em; }
+.sq-queue-sp-needed {
+	font-size: 0.72em;
+	color: var(--muted);
+	
+	margin-left: 0.35em;
+	font-weight: 400;
+	white-space: nowrap;
+}
 
 /* ── Skill controls ── */
 .sq-skill-controls { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.5rem; }

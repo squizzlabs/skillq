@@ -330,7 +330,7 @@ function renderCharMenu({ charName, activeTab = 'overview' } = {}) {
  *
  * renderCharSkills({ queue, skills, totalSP, unallocatedSP })
  *
- * queue:  [{ typeName, typeID, groupName, startTime, endTime, spHour }]
+ * queue:  [{ typeName, typeID, groupName, startTime, endTime, spHour, spNeeded }]
  * skills: [{ typeName, typeID, groupName, groupID, skillPoints, level,
  *            training, queue }]
  *   training/queue: level currently being trained/queued (0 if none)
@@ -339,6 +339,20 @@ function renderCharMenu({ charName, activeTab = 'overview' } = {}) {
 function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP = 0 } = {}) {
 	const el = _el('div', 'sq-skills');
 	const now = Date.now();
+	const computeQueueSpNeeded = (skill) => {
+		const explicit = Number(skill?.spNeeded);
+		if (Number.isFinite(explicit) && explicit > 0) return Math.ceil(explicit);
+
+		const startMs = skill?.startDate ? (Date.parse(skill.startDate) || 0) : 0;
+		const endMs = skill?.endDate ? (Date.parse(skill.endDate) || 0) : 0;
+		const spHour = Number(skill?.spHour || 0);
+		if (!startMs || !endMs || endMs <= startMs || spHour <= 0) return 0;
+
+		const effectiveStart = Math.max(now, startMs);
+		if (endMs <= effectiveStart) return 0;
+		const remainingHours = (endMs - effectiveStart) / 3600000;
+		return Math.max(0, Math.ceil(spHour * remainingHours));
+	};
 	const visibleQueue = (queue || []).filter((entry) => {
 		const endMs = entry?.endDate ? (Date.parse(entry.endDate) || 0) : 0;
 		return endMs <= 0 || endMs > now;
@@ -354,7 +368,7 @@ function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP 
 		const table = document.createElement('table');
 		table.className = 'sq-table sq-table--striped';
 		const thead = document.createElement('thead');
-		thead.innerHTML = '<tr><th>Skill</th><th>Group</th><th>Start</th><th>End</th><th>SP/h</th></tr>';
+		thead.innerHTML = '<tr><th>Skill <small class="sq-queue-sp-needed">SP remaining to complete skill</small></th><th>Group</th><th>Start</th><th>End</th><th>SP/h</th></tr>';
 		const tbody = document.createElement('tbody');
 		for (const skill of visibleQueue) {
 			const tr = document.createElement('tr');
@@ -373,6 +387,13 @@ function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP 
 			skillLink.href = `/item/${skill.typeID}/`;
 			skillLink.textContent = skill.typeName + (queueLevel ? ` ${toRomanNumeral(queueLevel)}` : '');
 			skillTd.appendChild(skillLink);
+			const spNeeded = computeQueueSpNeeded(skill);
+			if (spNeeded > 0) {
+				const spNeededSmall = document.createElement('small');
+				spNeededSmall.className = 'sq-queue-sp-needed';
+				spNeededSmall.textContent = ` ${numberFormat(spNeeded, 0)}`;
+				skillTd.appendChild(spNeededSmall);
+			}
 			tr.appendChild(skillTd);
 
 			const groupTd = document.createElement('td');
