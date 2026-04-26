@@ -23,12 +23,11 @@ jobs:
         sed -i -E "s|githubhash = \"\"|githubhash = \"${HASH}\"|g" js/app.js
         sed -i -E "s|--hash--|${HASH}|g" index.html
         sed -i -E "s|--hash--|${HASH}|g" js/app.js
-        sed -i -E "s|--hash--|${HASH}|g" sw.js
         echo "${HASH}" > .version
     
     - name: Verify hash replacement
       run: |
-        if grep -r "--hash--" index.html js/ sw.js 2>/dev/null; then
+        if grep -r "--hash--" index.html js/ 2>/dev/null; then
           echo "ERROR: Found unreplaced --hash-- placeholders"
           exit 1
         fi
