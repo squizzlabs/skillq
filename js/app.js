@@ -30,8 +30,8 @@ const MANAGE_SETTINGS_KEY = '__ui:manage-settings';
 const SKILL_ENABLES_INDEX_KEY = '__ui:skill-enables-index';
 const SHARE_URL_VERSION = 1;
 const SHARE_LINK_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
-let githubhash = "f370987";
-const staticCacheHash = 'f370987';
+let githubhash = "f663041";
+const staticCacheHash = 'f663041';
 let layoutMode = 'restricted';
 let themeMode = 'dark';
 
@@ -132,7 +132,7 @@ async function handleRoute() {
 	if (path === '/login-check') {
 		if (window?.esi?.whoami !== null) {
 			history.replaceState(null, '', '/');
-			return false;
+			return handleRoute();
 		}
 		await window.esi.authBegin();
 		return false;
