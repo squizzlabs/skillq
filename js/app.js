@@ -1,7 +1,8 @@
 let routerInitialized = false;
 const ESI_BASE = 'https://esi.evetech.net';
 const LOOKUP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const CHARACTER_DATA_TTL_MS = 60 * 60 * 1000;
+const CHARACTER_DATA_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const CHARACTER_DATA_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const BACKGROUND_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const BACKGROUND_REFRESH_JOB_INTERVAL_MS = 15 * 1000;
 const typeInfoCache = new Map();
@@ -35,9 +36,6 @@ let layoutMode = 'restricted';
 let themeMode = 'dark';
 
 function withStaticCacheHash(path) {
-	if (/([?&])v=/.test(path)) {
-		return path;
-	}
 	const cacheValue = githubhash || staticCacheHash;
 	const separator = path.includes('?') ? '&' : '?';
 	return `${path}${separator}v=${encodeURIComponent(cacheValue)}`;
@@ -2691,7 +2689,7 @@ async function shouldRunScheduledRefresh() {
 async function shouldRefreshCharacterData(key) {
 	const cached = await cacheGetCharacterData(key);
 	const last = Number(cached?.updatedAt || 0);
-	return !last || (Date.now() - last) >= CHARACTER_DATA_TTL_MS;
+	return !last || (Date.now() - last) >= CHARACTER_DATA_REFRESH_INTERVAL_MS;
 }
 
 async function fetchCharacterCommonData(characterId) {
@@ -3108,8 +3106,8 @@ async function ensureLocalSdeDataLoaded() {
 
 	localSdeDataPromise = (async () => {
 		const [types, groups] = await Promise.all([
-			fetchLocalJson('/data/types.json?v=--hash--'),
-			fetchLocalJson('/data/groups.json?v=--hash--')
+			fetchLocalJson('/data/types.json'),
+			fetchLocalJson('/data/groups.json')
 		]);
 
 		for (const [id, info] of Object.entries(types)) {
@@ -3249,7 +3247,7 @@ async function cacheSetCharacterData(key, value) {
 		if (areCharacterCacheValuesEqual(key, existing, value)) {
 			return false;
 		}
-		const ttl = key === LAST_BACKGROUND_REFRESH_KEY ? null : CHARACTER_DATA_TTL_MS;
+		const ttl = key === LAST_BACKGROUND_REFRESH_KEY ? null : CHARACTER_DATA_RETENTION_MS;
 		await characterDataStore.set(key, value, ttl);
 		if (key !== LAST_BACKGROUND_REFRESH_KEY) {
 			window.dispatchEvent(new CustomEvent(CHARACTER_DATA_UPDATED_EVENT, { detail: { key } }));
@@ -3272,7 +3270,7 @@ async function cacheTouchCharacterData(key) {
 		if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
 			return false;
 		}
-		const ttl = key === LAST_BACKGROUND_REFRESH_KEY ? null : CHARACTER_DATA_TTL_MS;
+		const ttl = key === LAST_BACKGROUND_REFRESH_KEY ? null : CHARACTER_DATA_RETENTION_MS;
 		await characterDataStore.set(key, {
 			...existing,
 			updatedAt: Date.now()
