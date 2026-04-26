@@ -30,8 +30,8 @@ const MANAGE_SETTINGS_KEY = '__ui:manage-settings';
 const SKILL_ENABLES_INDEX_KEY = '__ui:skill-enables-index';
 const SHARE_URL_VERSION = 1;
 const SHARE_LINK_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
-let githubhash = "c3180e4";
-const staticCacheHash = 'c3180e4';
+let githubhash = "6fdf5d9";
+const staticCacheHash = '6fdf5d9';
 let layoutMode = 'restricted';
 let themeMode = 'dark';
 
@@ -548,7 +548,7 @@ async function renderLegacyShareDeprecationPage(charName = '') {
 	alert.innerHTML = `
 		<strong>That share link format is no longer supported.</strong>
 		<p>SkillQ has been updated, and old links like <code>/char/&lt;name&gt;/share/&lt;id&gt;</code> are no longer valid.</p>
-		<p>Please ask for a new share link for the character ${readableName ? `Character: ${readableName}. ` : ''}</p>
+		<p>Please request a new share link for that character.</p>
 	`;
 
 	page.appendChild(alert);
