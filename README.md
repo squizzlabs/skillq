@@ -37,7 +37,7 @@ SkillQ can generate a snapshot link from a character overview page.
 
 ---
 
-Here are some example screenshots:
+### Example screenshots:
 
 ![Dashboard](./img/skillq_dash.png)
 
