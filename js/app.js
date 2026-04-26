@@ -132,7 +132,7 @@ async function handleRoute() {
 	if (path === '/login-check') {
 		if (window?.esi?.whoami !== null) {
 			history.replaceState(null, '', '/');
-			return false;
+			return handleRoute();
 		}
 		await window.esi.authBegin();
 		return false;
