@@ -548,7 +548,7 @@ async function renderLegacyShareDeprecationPage(charName = '') {
 	alert.innerHTML = `
 		<strong>That share link format is no longer supported.</strong>
 		<p>SkillQ has been updated, and old links like <code>/char/&lt;name&gt;/share/&lt;id&gt;</code> are no longer valid.</p>
-		<p>Please ask for a new share link for the character ${readableName ? `Character: ${readableName}. ` : ''}</p>
+		<p>Please request a new share link for that character.</p>
 	`;
 
 	page.appendChild(alert);
