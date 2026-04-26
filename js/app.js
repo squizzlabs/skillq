@@ -30,8 +30,8 @@ const MANAGE_SETTINGS_KEY = '__ui:manage-settings';
 const SKILL_ENABLES_INDEX_KEY = '__ui:skill-enables-index';
 const SHARE_URL_VERSION = 1;
 const SHARE_LINK_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
-let githubhash = "f663041";
-const staticCacheHash = 'f663041';
+let githubhash = "c3180e4";
+const staticCacheHash = 'c3180e4';
 let layoutMode = 'restricted';
 let themeMode = 'dark';
 
@@ -147,7 +147,7 @@ async function handleRoute() {
 		const confirmed = window.confirm('Logging out deletes all locally stored SkillQ data. Next time you log in, you will need to re-add all characters. Continue?');
 		if (!confirmed) {
 			history.replaceState(null, '', '/');
-			return false;
+			return handleRoute();
 		}
 		await clearAllLocalSkillQData();
 		await window.esi.authLogout(true, false);
@@ -158,6 +158,11 @@ async function handleRoute() {
 		await initLayoutMode();
 		await renderSharedCharacterPage();
 		return false;
+	}
+
+	if (route.name === 'legacy-share') {
+		await renderLegacyShareDeprecationPage(route.charName);
+		return true;
 	}
 
 	if (route.name === 'readme') {
@@ -203,11 +208,18 @@ async function handleRoute() {
 
 function parseRoute(pathname) {
 	const cleaned = pathname.replace(/\/+$/, '') || '/';
+	const parts = cleaned.split('/').filter(Boolean);
 	if (cleaned === '/readme') {
 		return { name: 'readme' };
 	}
 	if (cleaned === '/share' || cleaned.startsWith('/share/')) {
 		return { name: 'share' };
+	}
+	if (parts[0] === 'char' && parts[2] === 'share' && parts.length >= 4) {
+		return {
+			name: 'legacy-share',
+			charName: decodeCharacterNameFromPath(parts[1] || '')
+		};
 	}
 	if (cleaned === '/manage') {
 		return { name: 'manage' };
@@ -216,7 +228,6 @@ function parseRoute(pathname) {
 		return { name: 'settings' };
 	}
 	if (cleaned.startsWith('/item/')) {
-		const parts = cleaned.split('/').filter(Boolean);
 		return {
 			name: 'item',
 			itemId: Number(parts[1] || 0)
@@ -226,7 +237,6 @@ function parseRoute(pathname) {
 		return { name: 'home' };
 	}
 
-	const parts = cleaned.split('/').filter(Boolean);
 	return {
 		name: 'char',
 		charName: decodeCharacterNameFromPath(parts[1] || ''),
@@ -518,6 +528,34 @@ async function renderReadmePage() {
 	await loadReadme();
 	document.getElementById('about').classList.remove('d-none');
 	document.getElementById('skillq').classList.add('d-none');
+}
+
+async function renderLegacyShareDeprecationPage(charName = '') {
+	await renderCurrentNavbarForUtilityPage();
+
+	const cardsRoot = document.getElementById('char-cards-root');
+	cardsRoot.replaceChildren();
+	cardsRoot.classList.add('d-none');
+	document.getElementById('net-summary').classList.add('d-none');
+
+	const charViewRoot = document.getElementById('char-view-root');
+	const page = document.createElement('div');
+	page.className = 'sq-char-view';
+
+	const alert = document.createElement('div');
+	alert.className = 'sq-alert';
+	const readableName = String(charName || '').trim();
+	alert.innerHTML = `
+		<strong>That share link format is no longer supported.</strong>
+		<p>SkillQ has been updated, and old links like <code>/char/&lt;name&gt;/share/&lt;id&gt;</code> are no longer valid.</p>
+		<p>Please ask for a new share link for the character ${readableName ? `Character: ${readableName}. ` : ''}</p>
+	`;
+
+	page.appendChild(alert);
+	charViewRoot.replaceChildren(page);
+
+	document.getElementById('about').classList.add('d-none');
+	document.getElementById('skillq').classList.remove('d-none');
 }
 
 function findCurrentCorporationHistoryEntry(historyRows, corporationId) {
