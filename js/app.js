@@ -160,6 +160,11 @@ async function handleRoute() {
 		return false;
 	}
 
+	if (route.name === 'legacy-share') {
+		await renderLegacyShareDeprecationPage(route.charName);
+		return true;
+	}
+
 	if (route.name === 'readme') {
 		await renderReadmePage();
 		return true;
@@ -203,11 +208,18 @@ async function handleRoute() {
 
 function parseRoute(pathname) {
 	const cleaned = pathname.replace(/\/+$/, '') || '/';
+	const parts = cleaned.split('/').filter(Boolean);
 	if (cleaned === '/readme') {
 		return { name: 'readme' };
 	}
 	if (cleaned === '/share' || cleaned.startsWith('/share/')) {
 		return { name: 'share' };
+	}
+	if (parts[0] === 'char' && parts[2] === 'share' && parts.length >= 4) {
+		return {
+			name: 'legacy-share',
+			charName: decodeCharacterNameFromPath(parts[1] || '')
+		};
 	}
 	if (cleaned === '/manage') {
 		return { name: 'manage' };
@@ -216,7 +228,6 @@ function parseRoute(pathname) {
 		return { name: 'settings' };
 	}
 	if (cleaned.startsWith('/item/')) {
-		const parts = cleaned.split('/').filter(Boolean);
 		return {
 			name: 'item',
 			itemId: Number(parts[1] || 0)
@@ -226,7 +237,6 @@ function parseRoute(pathname) {
 		return { name: 'home' };
 	}
 
-	const parts = cleaned.split('/').filter(Boolean);
 	return {
 		name: 'char',
 		charName: decodeCharacterNameFromPath(parts[1] || ''),
@@ -518,6 +528,34 @@ async function renderReadmePage() {
 	await loadReadme();
 	document.getElementById('about').classList.remove('d-none');
 	document.getElementById('skillq').classList.add('d-none');
+}
+
+async function renderLegacyShareDeprecationPage(charName = '') {
+	await renderCurrentNavbarForUtilityPage();
+
+	const cardsRoot = document.getElementById('char-cards-root');
+	cardsRoot.replaceChildren();
+	cardsRoot.classList.add('d-none');
+	document.getElementById('net-summary').classList.add('d-none');
+
+	const charViewRoot = document.getElementById('char-view-root');
+	const page = document.createElement('div');
+	page.className = 'sq-char-view';
+
+	const alert = document.createElement('div');
+	alert.className = 'sq-alert';
+	const readableName = String(charName || '').trim();
+	alert.innerHTML = `
+		<strong>That share link format is no longer supported.</strong>
+		<p>SkillQ has been updated, and old links like <code>/char/&lt;name&gt;/share/&lt;id&gt;</code> are no longer valid.</p>
+		<p>Please ask for a new share link for the character ${readableName ? `Character: ${readableName}. ` : ''}</p>
+	`;
+
+	page.appendChild(alert);
+	charViewRoot.replaceChildren(page);
+
+	document.getElementById('about').classList.add('d-none');
+	document.getElementById('skillq').classList.remove('d-none');
 }
 
 function findCurrentCorporationHistoryEntry(historyRows, corporationId) {
