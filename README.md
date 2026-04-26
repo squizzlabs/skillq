@@ -35,6 +35,8 @@ SkillQ can generate a snapshot link from a character overview page.
 > - **Corporation binding**: shares invalidate if the character changes corporations.
 > - **Tampering warning**: URL data can be edited by a user, so treat shared data as informational.
 
+---
+
 Here are some example screenshots:
 
 ![Dashboard](./img/skillq_dash.png)
