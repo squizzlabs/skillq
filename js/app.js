@@ -30,8 +30,8 @@ const MANAGE_SETTINGS_KEY = '__ui:manage-settings';
 const SKILL_ENABLES_INDEX_KEY = '__ui:skill-enables-index';
 const SHARE_URL_VERSION = 1;
 const SHARE_LINK_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
-let githubhash = "19f9ef4";
-const staticCacheHash = '19f9ef4';
+let githubhash = "7fda313";
+const staticCacheHash = window.location.hostname === 'localhost' ? Date.now() : '7fda313';
 let layoutMode = 'restricted';
 let themeMode = 'dark';
 
@@ -3401,7 +3401,7 @@ function getSkillPointsForLevel(level, rank) {
 
 async function loadReadme() {
 	try {
-		const response = await fetch(withStaticCacheHash('/README.md'));
+		const response = await fetch(withStaticCacheHash('/README.md?v=' + staticCacheHash));
 		if (!response.ok) throw new Error(`Failed to fetch README: ${response.status}`);
 		const markdown = await response.text();
 		
