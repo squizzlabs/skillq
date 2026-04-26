@@ -29,8 +29,19 @@ const MANAGE_SETTINGS_KEY = '__ui:manage-settings';
 const SKILL_ENABLES_INDEX_KEY = '__ui:skill-enables-index';
 const SHARE_URL_VERSION = 1;
 const SHARE_LINK_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+let githubhash = "";
+const staticCacheHash = '--hash--';
 let layoutMode = 'restricted';
 let themeMode = 'dark';
+
+function withStaticCacheHash(path) {
+	if (/([?&])v=/.test(path)) {
+		return path;
+	}
+	const cacheValue = githubhash || staticCacheHash;
+	const separator = path.includes('?') ? '&' : '?';
+	return `${path}${separator}v=${encodeURIComponent(cacheValue)}`;
+}
 
 document.addEventListener('DOMContentLoaded', doBtnBinds);
 document.addEventListener('DOMContentLoaded', main);
@@ -3097,8 +3108,8 @@ async function ensureLocalSdeDataLoaded() {
 
 	localSdeDataPromise = (async () => {
 		const [types, groups] = await Promise.all([
-			fetchLocalJson('/data/types.json'),
-			fetchLocalJson('/data/groups.json')
+			fetchLocalJson('/data/types.json?v=--hash--'),
+			fetchLocalJson('/data/groups.json?v=--hash--')
 		]);
 
 		for (const [id, info] of Object.entries(types)) {
@@ -3115,7 +3126,7 @@ async function ensureLocalSdeDataLoaded() {
 
 async function fetchLocalJson(path) {
 	try {
-		const response = await fetch(path);
+		const response = await fetch(withStaticCacheHash(path));
 		if (!response.ok) return {};
 		return await response.json();
 	} catch (_) {
@@ -3354,7 +3365,7 @@ function getSkillPointsForLevel(level, rank) {
 
 async function loadReadme() {
 	try {
-		const response = await fetch('/README.md');
+		const response = await fetch(withStaticCacheHash('/README.md'));
 		if (!response.ok) throw new Error(`Failed to fetch README: ${response.status}`);
 		const markdown = await response.text();
 		
