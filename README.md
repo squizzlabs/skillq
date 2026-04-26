@@ -23,7 +23,7 @@ SkillQ lets you monitor all your EVE Online characters in one place from any bro
 
 ### Shares
 
-SkillQ can generate a signed snapshot link from a character overview page.
+SkillQ can generate a snapshot link from a character overview page.
 
 > **Important share caveats**
 >
