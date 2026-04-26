@@ -23,7 +23,7 @@ SkillQ lets you monitor all your EVE Online characters in one place from any bro
 
 ### Shares
 
-SkillQ can generate a signed snapshot link from a character overview page.
+SkillQ can generate a snapshot link from a character overview page.
 
 > **Important share caveats**
 >
@@ -34,6 +34,8 @@ SkillQ can generate a signed snapshot link from a character overview page.
 > - **Expiry**: shares expire after 30 days.
 > - **Corporation binding**: shares invalidate if the character changes corporations.
 > - **Tampering warning**: URL data can be edited by a user, so treat shared data as informational.
+
+---
 
 Here are some example screenshots:
 
