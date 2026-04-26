@@ -147,7 +147,7 @@ async function handleRoute() {
 		const confirmed = window.confirm('Logging out deletes all locally stored SkillQ data. Next time you log in, you will need to re-add all characters. Continue?');
 		if (!confirmed) {
 			history.replaceState(null, '', '/');
-			return false;
+			return handleRoute();
 		}
 		await clearAllLocalSkillQData();
 		await window.esi.authLogout(true, false);
