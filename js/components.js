@@ -93,7 +93,7 @@ function renderNavbar({ characters = [], currentCharId = null, isLoggedIn = fals
 
 	// Brand
 	const brand = _a('/', null, 'sq-nav__brand');
-	brand.appendChild(_img('/img/skillbook.png', 'Skillbook', 'sq-nav__brand-icon'));
+	brand.appendChild(_img('/img/skillbook.png', 'Skillbook', 'sq-nav__brand-icon', {id: 'sq-brand-icon'}));
 	brand.appendChild(_el('span', 'sq-nav__brand-text', 'SkillQ'));
 	nav.appendChild(brand);
 
@@ -114,7 +114,8 @@ function renderNavbar({ characters = [], currentCharId = null, isLoggedIn = fals
 			a.appendChild(_img(
 				`https://images.evetech.net/characters/${char.character_id}/portrait?size=32`,
 				char.name,
-				'sq-nav__char-img'
+				'sq-nav__char-img',
+				{id: `sq-char-${char.character_id}-img`}
 			));
 			strip.appendChild(a);
 		}
