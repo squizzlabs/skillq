@@ -23,7 +23,7 @@ jobs:
         sed -i -E "s|githubhash = \"\"|githubhash = \"${HASH}\"|g" js/app.js
         sed -i -E "s|--hash--|${HASH}|g" index.html
         sed -i -E "s|--hash--|${HASH}|g" js/app.js
-        echo "${HASH}" > .version
+        echo "${HASH}" > version.txt
     
     - name: Verify hash replacement
       run: |
@@ -39,4 +39,4 @@ jobs:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         publish_dir: .
         publish_branch: gh-pages
-        exclude_assets: '.github,.gitignore,.gitattributes,.version'
+        exclude_assets: '.github,.gitignore,.gitattributes'
