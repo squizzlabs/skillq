@@ -478,6 +478,19 @@ top: 0;
 z-index: 100;
 box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
+.sq-nav__brand-icon--pulse {
+	animation: pulse 1.5s linear infinite;
+}
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 0.1;
+	}
+
+	50% {
+		opacity: 1;
+	}
+}
 .sq-nav__brand {
 font-weight: 700;
 font-size: 1rem;
@@ -493,8 +506,8 @@ gap: 0.45rem;
 }
 .sq-nav__brand:hover { text-decoration: none; background: var(--nav-hover); }
 .sq-nav__brand-icon {
-	width: 20px;
-	height: 20px;
+	width: 32px;
+	height: 32px;
 	border-radius: 3px;
 	flex-shrink: 0;
 	background-color: transparent;

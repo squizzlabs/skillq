@@ -32,6 +32,7 @@ if (window.location.hostname === '127.0.0.1') {
 				loginURL: '/login',
 				authURL: '/auth',
 				logoutURL: '/logout',
+				esiInFlightHandler: esiInFlightHandler,
 				postAuthRedirect: (whoami) => {
 					const characterName = encodeCharacterNameForPath(whoami?.name || `${whoami?.character_id || ''}`);
 					return characterName ? `/char/${characterName}` : '/';
@@ -52,6 +53,19 @@ if (window.location.hostname === '127.0.0.1') {
 			console.log(e);
 		}
 	})();
+}
+
+function esiInFlightHandler(count) {
+	console.log(`ESI in-flight requests: ${count}`);
+	// When count is greater than 0, we're going to pulse sq-brand-icon, otherwise we'll stop it.
+	const icon = document.getElementById('sq-brand-icon');
+	if (!icon) return;
+
+	if (count > 0) {
+		icon.classList.add('sq-nav__brand-icon--pulse');
+	} else {
+		icon.classList.remove('sq-nav__brand-icon--pulse');
+	}
 }
 
 function installSingleTabEsiCoordinator(esi) {
