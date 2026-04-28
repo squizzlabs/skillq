@@ -54,12 +54,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add data/groups.json data/latest.json data/types.json
+          git add data/groups.json data/types.json
 
+          # Only commit if groups.json or types.json change
           if git diff --cached --quiet; then
             echo "No changes in SDE data files"
             exit 0
           fi
+
+          git add data/latest.json
 
           git commit -m "chore(data): update SDE JSON snapshots"
 
