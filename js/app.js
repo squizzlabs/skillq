@@ -31,8 +31,8 @@ const MANAGE_SETTINGS_KEY = '__ui:manage-settings';
 const SKILL_ENABLES_INDEX_KEY = '__ui:skill-enables-index';
 const SHARE_URL_VERSION = 1;
 const SHARE_LINK_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
-let githubhash = "0093258";
-const staticCacheHash = window.location.hostname === 'localhost' ? Date.now() : '0093258';
+let githubhash = "d1f2bac";
+const staticCacheHash = window.location.hostname === 'localhost' ? Date.now() : 'd1f2bac';
 let layoutMode = 'restricted';
 let themeMode = 'dark';
 
