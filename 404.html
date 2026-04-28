@@ -4,12 +4,12 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>SkillQ.net</title>
-	<link rel="stylesheet" href="/css/skillq.css?v=20260425" />
+	<link rel="stylesheet" href="/css/skillq.css?v=--hash--" />
 
 	<script>
 		(function () {
 			const url = new URL(window.location.href);
-			const target = new URL('/index.html', url.origin);
+			const target = new URL('/index.html?v=--hash--', url.origin);
 			target.searchParams.set('route', url.pathname);
 			target.searchParams.set('routeQuery', url.search);
 			window.location = target.toString() + url.hash;

@@ -425,8 +425,24 @@ class SimpleESI {
 					}
 				}
 				if (!res.ok) {
-					console.error(res);
-					console.error(await res.text());
+					const oauthErrorDetails = await this.parseOAuthErrorResponse(res);
+					this.errorlogger('Request failed:', method, url, res.status, res.statusText);
+					if (oauthErrorDetails.rawText) {
+						this.errorlogger(oauthErrorDetails.rawText);
+					}
+
+					if (String(oauthErrorDetails.oauthError || '').toLowerCase() === 'invalid_grant') {
+						throw this.createTokenRefreshError(
+							this.whoami?.character_id,
+							oauthErrorDetails.errorDescription || 'OAuth invalid_grant',
+							{
+								code: 'invalid_grant',
+								oauthError: oauthErrorDetails.oauthError,
+								errorDescription: oauthErrorDetails.errorDescription,
+								status: res?.status
+							}
+						);
+					}
 				}
 
 				// Rate limit handling with error protection
@@ -549,6 +565,53 @@ class SimpleESI {
 		}
 	}
 
+	createTokenRefreshError(character_id, message, options = {}) {
+		const err = new Error(message || 'Token refresh failed');
+		err.name = 'SimpleESITokenRefreshError';
+		err.characterId = String(character_id || '');
+		err.code = options.code || 'token_refresh_failed';
+		err.oauthError = options.oauthError || null;
+		err.errorDescription = options.errorDescription || null;
+		err.status = Number(options.status || 0) || null;
+		return err;
+	}
+
+	async parseOAuthErrorResponse(res) {
+		const details = {
+			oauthError: null,
+			errorDescription: null,
+			rawText: null
+		};
+
+		if (!res) {
+			return details;
+		}
+
+		try {
+			const text = await res.clone().text();
+			details.rawText = text;
+			if (!text) {
+				return details;
+			}
+
+			try {
+				const json = JSON.parse(text);
+				details.oauthError = String(json?.error || '').trim() || null;
+				details.errorDescription = String(json?.error_description || '').trim() || null;
+			} catch (_) {
+				// Ignore JSON parsing failures and rely on text matching.
+			}
+
+			if (!details.oauthError && /\binvalid_grant\b/i.test(text)) {
+				details.oauthError = 'invalid_grant';
+			}
+		} catch (_) {
+			// Ignore body parsing failures.
+		}
+
+		return details;
+	}
+
 	async getAccessToken(character_id = this.whoami.character_id) {
 		const lockKey = `access_token_lock_${character_id}`;
 		try {
@@ -561,7 +624,11 @@ class SimpleESI {
 			let current_access_token = await this.lsGet('access_token', character_id);
 			if (current_access_token === null) {
 				let authed_json = await this.lsGet('authed_json', character_id);
-				if (authed_json === null) return this.authLogout();
+				if (authed_json === null) {
+					throw this.createTokenRefreshError(character_id, 'Missing refresh token data for character', {
+						code: 'missing_refresh_token'
+					});
+				}
 				const body = {
 					grant_type: 'refresh_token',
 					refresh_token: authed_json.refresh_token,
@@ -571,15 +638,33 @@ class SimpleESI {
 				let res = await this.doRequest(this.ssoTokenUrl, 'POST', this.mimetypeForm, body);
 			
 				if (!res || !res.ok) {
-					this.errorlogger('Token refresh failed:', res?.status);
-					return this.authLogout();
+					let errorJson = null;
+					try {
+						errorJson = await res?.clone()?.json();
+					} catch (_) {
+						errorJson = null;
+					}
+					const oauthError = String(errorJson?.error || '').trim() || null;
+					const errorDescription = String(errorJson?.error_description || '').trim() || null;
+					throw this.createTokenRefreshError(
+						character_id,
+						errorDescription || oauthError || `Token refresh failed (${res?.status || 'unknown status'})`,
+						{
+							code: oauthError || 'token_refresh_failed',
+							oauthError,
+							errorDescription,
+							status: res?.status
+						}
+					);
 				}
 			
 				let json = await res.json();
 
 				if (!json.access_token || !json.expires_in) {
-					this.errorlogger('Invalid token refresh response');
-					return this.authLogout();
+					throw this.createTokenRefreshError(character_id, 'Invalid token refresh response', {
+						code: 'invalid_token_response',
+						status: res?.status
+					});
 				}
 
 				current_access_token = json.access_token;

@@ -17,6 +17,7 @@ const characterDataStore = new DexieStore('skillq-character-data-db', 'skillq-ch
 let backgroundRefreshInitialized = false;
 let cacheAutoRenderInitialized = false;
 let routeRerenderScheduled = false;
+const removingCharactersForAuthError = new Set();
 const LAST_BACKGROUND_REFRESH_KEY = '__meta:last-background-refresh';
 const CHARACTER_DATA_UPDATED_EVENT = 'skillq:character-data-updated';
 const CHARACTER_DATA_SYNC_CHANNEL_NAME = 'skillq:character-data-sync';
@@ -200,6 +201,10 @@ async function handleRoute() {
 		}
 		await renderAccountPage();
 		return true;
+	}
+
+	if (route.name === 'home' && path !== '/') {
+		history.replaceState(null, '', '/');
 	}
 
 	await renderLoggedInHome();
@@ -2166,9 +2171,7 @@ async function removeManagedCharacter(characterId, characterName) {
 	const confirmed = window.confirm(`Remove ${characterName} from local SkillQ data on this browser?`);
 	if (!confirmed) return;
 
-	await window.esi.removeCharacter(characterId);
-	await clearCharacterLocalData(characterId);
-	await removeCharacterFromManageSettings(characterId);
+	await removeCharacterAndLocalData(characterId);
 
 	if (!window.esi.whoami) {
 		history.replaceState(null, '', '/');
@@ -2177,6 +2180,62 @@ async function removeManagedCharacter(characterId, characterName) {
 	}
 
 	await renderManagePage();
+}
+
+async function removeCharacterAndLocalData(characterId) {
+	await window.esi.removeCharacter(characterId);
+	await clearCharacterLocalData(characterId);
+	await removeCharacterFromManageSettings(characterId);
+}
+
+function isCharacterRefreshTokenError(err) {
+	if (!err || err.name !== 'SimpleESITokenRefreshError') {
+		return false;
+	}
+	const code = String(err.code || '').toLowerCase();
+	return code === 'invalid_grant';
+}
+
+async function handleCharacterRefreshTokenError(err, characterId) {
+	if (!isCharacterRefreshTokenError(err)) {
+		return false;
+	}
+
+	const charId = String(characterId || err?.characterId || '');
+	if (!charId) {
+		return false;
+	}
+	if (removingCharactersForAuthError.has(charId)) {
+		return true;
+	}
+
+	removingCharactersForAuthError.add(charId);
+	try {
+		console.warn(`Removing character ${charId} due to refresh token failure`, err);
+		await removeCharacterAndLocalData(charId);
+
+		if (!window.esi?.whoami) {
+			history.replaceState(null, '', '/');
+			await handleRoute();
+			return true;
+		}
+
+		scheduleRouteRerender();
+		return true;
+	} finally {
+		removingCharactersForAuthError.delete(charId);
+	}
+}
+
+async function fallbackUnlessCharacterRefreshTokenError(promise, fallbackValue, characterId) {
+	try {
+		return await promise;
+	} catch (err) {
+		if (await handleCharacterRefreshTokenError(err, characterId)) {
+			throw err;
+		}
+		return (typeof fallbackValue === 'function') ? fallbackValue() : fallbackValue;
+	}
 }
 
 async function clearCharacterLocalData(characterId) {
@@ -2503,6 +2562,9 @@ async function refreshCharacterSummaryInBackground(characterId, characterName) {
 			updatedAt: Date.now()
 		}) || await cacheTouchCharacterData(`summary:${characterId}`);
 	} catch (err) {
+		if (await handleCharacterRefreshTokenError(err, characterId)) {
+			return;
+		}
 		console.warn(`Background summary refresh failed for ${characterId}`, err);
 	}
 }
@@ -2577,6 +2639,9 @@ async function refreshCharacterPageInBackground(characterId, tab) {
 		await cacheSetCharacterData(`overview:${characterId}`, overview)
 			|| await cacheTouchCharacterData(`overview:${characterId}`);
 	} catch (err) {
+		if (await handleCharacterRefreshTokenError(err, characterId)) {
+			return;
+		}
 		console.warn(`Background page refresh failed for ${characterId}`, err);
 	}
 }
@@ -2735,7 +2800,11 @@ async function fetchCharacterCommonData(characterId) {
 		const [charInfo, balance, queue, history] = await Promise.all([
 			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}`, 'GET', null, null, characterId),
 			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet`, 'GET', null, null, characterId),
-			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId).catch(() => []),
+			fallbackUnlessCharacterRefreshTokenError(
+				window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId),
+				[],
+				characterId
+			),
 			window.esi.doJsonRequest(`${ESI_BASE}/characters/${characterId}/corporationhistory`).catch(() => [])
 		]);
 
@@ -2776,6 +2845,9 @@ async function fetchCharacterCommonData(characterId) {
 			message: null
 		};
 	} catch (err) {
+		if (await handleCharacterRefreshTokenError(err, characterId)) {
+			throw err;
+		}
 		// If fetch fails, return cached data so users see stale data instead of nothing
 		console.warn(`Failed to fetch fresh character common data for ${characterId}, using cache:`, err);
 		const cached = await cacheGetCharacterData(`common:${characterId}`);
@@ -2790,7 +2862,11 @@ async function fetchSkillsOverview(characterId) {
 	try {
 		const [skillsResponse, queueResponse] = await Promise.all([
 			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId),
-			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId).catch(() => [])
+			fallbackUnlessCharacterRefreshTokenError(
+				window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skillqueue`, 'GET', null, null, characterId),
+				[],
+				characterId
+			)
 		]);
 
 		const skills = skillsResponse?.skills || [];
@@ -2867,6 +2943,9 @@ async function fetchSkillsOverview(characterId) {
 			unallocatedSP: Number(skillsResponse?.unallocated_sp || 0)
 		};
 	} catch (err) {
+		if (await handleCharacterRefreshTokenError(err, characterId)) {
+			throw err;
+		}
 		// If fetch fails, return cached data so users see stale data instead of nothing
 		console.warn(`Failed to fetch fresh skills overview for ${characterId}, using cache:`, err);
 		const cached = await cacheGetCharacterData(`overview:${characterId}`);
@@ -2944,7 +3023,11 @@ function applyOverviewTrainingToCommonData(data, queueRows) {
 
 async function fetchWalletRows(characterId) {
 	try {
-		const rows = await window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet/journal?page=1`, 'GET', null, null, characterId).catch(() => []);
+		const rows = await fallbackUnlessCharacterRefreshTokenError(
+			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/wallet/journal?page=1`, 'GET', null, null, characterId),
+			[],
+			characterId
+		);
 		const ids = Array.from(new Set(rows.flatMap((row) => [row.first_party_id, row.second_party_id]).filter((id) => Number(id) > 0)));
 		const names = await resolveUniverseNames(ids);
 
@@ -2958,6 +3041,9 @@ async function fetchWalletRows(characterId) {
 			reason: row.description || ''
 		}));
 	} catch (err) {
+		if (await handleCharacterRefreshTokenError(err, characterId)) {
+			throw err;
+		}
 		// If fetch fails, return cached data so users see stale data instead of nothing
 		console.warn(`Failed to fetch fresh wallet rows for ${characterId}, using cache:`, err);
 		const cached = await cacheGetCharacterData(`wallet:${characterId}`);
@@ -2971,9 +3057,21 @@ async function fetchWalletRows(characterId) {
 async function fetchTrainingSuggestions(characterId) {
 	try {
 		const [attributes, implants, skillsResponse] = await Promise.all([
-			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/attributes`, 'GET', null, null, characterId).catch(() => null),
-			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/implants`, 'GET', null, null, characterId).catch(() => []),
-			window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId).catch(() => ({ skills: [] }))
+			fallbackUnlessCharacterRefreshTokenError(
+				window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/attributes`, 'GET', null, null, characterId),
+				null,
+				characterId
+			),
+			fallbackUnlessCharacterRefreshTokenError(
+				window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/implants`, 'GET', null, null, characterId),
+				[],
+				characterId
+			),
+			fallbackUnlessCharacterRefreshTokenError(
+				window.esi.doJsonAuthRequest(`${ESI_BASE}/characters/${characterId}/skills`, 'GET', null, null, characterId),
+				({ skills: [] }),
+				characterId
+			)
 		]);
 
 		const implantInfos = await Promise.all((implants || []).map((typeId) => getTypeInfo(typeId)));
@@ -2988,6 +3086,9 @@ async function fetchTrainingSuggestions(characterId) {
 		const suggestions = await buildTrainingSuggestions(skillsResponse?.skills || [], attributes);
 		return { implants: attributeRows, suggestions };
 	} catch (err) {
+		if (await handleCharacterRefreshTokenError(err, characterId)) {
+			throw err;
+		}
 		// If fetch fails, return cached data so users see stale data instead of nothing
 		console.warn(`Failed to fetch fresh training suggestions for ${characterId}, using cache:`, err);
 		const cached = await cacheGetCharacterData(`train:${characterId}`);
