@@ -219,6 +219,21 @@ a:hover { color: var(--link-hover); text-decoration: underline; }
 	line-height: 1.35;
 }
 
+.sq-footer__icon {
+	vertical-align: middle;
+	display: inline-block;
+}
+
+.sq-footer__icon--github {
+	width: 24px;
+	height: 24px;
+}
+
+.sq-footer__icon--badge {
+	width: 111px;
+	height: 20px;
+}
+
 @media (max-width: 768px) {
 	.sq-footer__inner {
 		flex-direction: column;
