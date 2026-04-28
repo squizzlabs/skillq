@@ -203,7 +203,7 @@ async function handleRoute() {
 		return true;
 	}
 
-	if (route.name === 'home' && path !== '/') {
+	if (route.name === 'home' && (path !== '/' || window.location.search || window.location.hash)) {
 		history.replaceState(null, '', '/');
 	}
 
