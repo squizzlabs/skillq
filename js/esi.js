@@ -55,6 +55,7 @@ if (window.location.hostname === '127.0.0.1') {
 	})();
 }
 
+let esiInFlightFinished;
 function esiInFlightHandler(count) {
 	console.log(`ESI in-flight requests: ${count}`);
 	// When count is greater than 0, we're going to pulse sq-brand-icon, otherwise we'll stop it.
@@ -64,8 +65,15 @@ function esiInFlightHandler(count) {
 	if (count > 0) {
 		icon.classList.add('sq-nav__brand-icon--pulse');
 	} else {
-		icon.classList.remove('sq-nav__brand-icon--pulse');
+		clearTimeout(esiInFlightFinished);
+		esiInFlightFinished = setTimeout(removeEsiInFlightClass, 3000);
 	}
+}
+
+function removeEsiInFlightClass() {
+	const icon = document.getElementById('sq-brand-icon');
+	if (!icon) return;
+	icon.classList.remove('sq-nav__brand-icon--pulse');
 }
 
 function installSingleTabEsiCoordinator(esi) {
