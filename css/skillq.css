@@ -229,11 +229,6 @@ a:hover { color: var(--link-hover); text-decoration: underline; }
 	height: 24px;
 }
 
-.sq-footer__icon--badge {
-	width: 111px;
-	height: 20px;
-}
-
 @media (max-width: 768px) {
 	.sq-footer__inner {
 		flex-direction: column;
