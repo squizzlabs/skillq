@@ -2113,7 +2113,7 @@ function buildCharacterTabContent(data, activeTab) {
 
 	if (activeTab === 'train') {
 		content.appendChild(renderCharTrain({
-			implants: data.implants || [],
+			characterId: data.character?.character_id,			implants: data.implants || [],
 			suggestions: data.suggestions || [],
 			optimize: data.optimize || null
 		}));
@@ -2736,7 +2736,10 @@ function _extractRequirementRows(typeInfo) {
 	const pairs = [
 		{ skillAttrId: 182, levelAttrId: 277 },
 		{ skillAttrId: 183, levelAttrId: 278 },
-		{ skillAttrId: 184, levelAttrId: 279 }
+		{ skillAttrId: 184, levelAttrId: 279 },
+		{ skillAttrId: 1285, levelAttrId: 1286 },
+		{ skillAttrId: 1289, levelAttrId: 1287 },
+		{ skillAttrId: 1290, levelAttrId: 1288 }
 	];
 
 	return pairs.map(({ skillAttrId, levelAttrId }) => ({
@@ -2886,6 +2889,77 @@ async function optimizeSkillQueueOrder(queue = [], skills = []) {
 }
 
 window.optimizeSkillQueueOrder = optimizeSkillQueueOrder;
+
+async function buildQuickestSkillsToV(skills, attributes) {
+	const levels = new Map(skills.map(skill => [Number(skill.skill_id), Number(skill.trained_skill_level || 0)]));
+	const points = new Map(skills.map(skill => [Number(skill.skill_id), Number(skill.skillpoints_in_skill || 0)]));
+	const targets = new Set(skills.filter(skill => Number(skill.trained_skill_level || 0) < 5).map(skill => Number(skill.skill_id)));
+	const infos = new Map();
+	const queue = [];
+	// Each candidate includes its complete prerequisite path from the planned state.
+	const plan = async (id, level, planned, visiting, rows) => {
+		if ((planned.get(id) ?? levels.get(id) ?? 0) >= level) return;
+		if (visiting.has(id)) throw new Error('Cyclic skill requirements.');
+		visiting.add(id);
+		if (!infos.has(id)) infos.set(id, await getTypeInfo(id));
+		const info = infos.get(id);
+		const rank = _getDogmaValue(info, 275);
+		const rate = calculateSkillSpPerHour(attributes, attributeIdToName(_getDogmaValue(info, 180)), attributeIdToName(_getDogmaValue(info, 181)));
+		if (!(rank > 0) || !(rate > 0)) throw new Error('Missing training data for ' + (info?.name || id));
+		for (const requirement of _extractRequirementRows(info)) {
+			await plan(requirement.typeID, requirement.requiredSkillLevel, planned, visiting, rows);
+		}
+		const currentLevel = planned.get(id) ?? levels.get(id) ?? 0;
+		for (let next = currentLevel + 1; next <= level; next++) {
+			const start = Math.max(points.get(id) || 0, getSkillPointsForLevel(next - 1, rank));
+			const spNeeded = Math.max(0, getSkillPointsForLevel(next, rank) - start);
+			rows.push({ typeID: id, typeName: info.name, level: next, spNeeded, expectedSpHour: rate });
+		}
+		planned.set(id, level);
+		visiting.delete(id);
+	};
+	while (targets.size) {
+		let best;
+		for (const id of targets) {
+			if (levels.get(id) >= 5) { targets.delete(id); continue; }
+			const rows = [];
+			await plan(id, 5, new Map(), new Set(), rows);
+			const seconds = rows.reduce((total, row) => total + row.spNeeded / row.expectedSpHour * 3600, 0);
+			if (!best || seconds < best.seconds || (seconds === best.seconds && infos.get(id).name.localeCompare(infos.get(best.id).name) < 0)) best = { id, rows, seconds };
+		}
+		if (!best) break;
+		queue.push(...best.rows);
+		for (const row of best.rows) levels.set(row.typeID, row.level);
+		targets.delete(best.id);
+	}
+	return queue;
+}
+
+window.quickestSkillsToV = async function(characterId) {
+	const [skills, attributes, implants] = await Promise.all([
+		fetchLatestCharacterAuthJson(`${ESI_BASE}/characters/${characterId}/skills`, characterId),
+		fetchLatestCharacterAuthJson(`${ESI_BASE}/characters/${characterId}/attributes`, characterId),
+		fetchLatestCharacterAuthJson(`${ESI_BASE}/characters/${characterId}/implants`, characterId)
+	]);
+	const implantInfos = [];
+	for (const id of implants) {
+		const info = await getTypeInfo(id);
+		if (!_hasDogmaAttributes(info)) throw new Error('Missing implant data.');
+		implantInfos.push(info);
+	}
+	const bonuses = buildAttributeImplantMap(implantInfos);
+	// A current remap totals 99 points. Remove the uniform accelerator bonus,
+	// retaining the current distribution and active implants even with an empty queue.
+	const excess = TRAINING_ATTRIBUTE_NAMES.reduce((sum, name) => sum + Number(attributes[name]) - Number(bonuses[name]?.bonus || 0), 0) - 99;
+	const offset = excess / 5;
+	const baseline = subtractGlobalAttributeOffset(attributes, offset);
+	if (!Number.isInteger(offset) || offset < 0 || TRAINING_ATTRIBUTE_NAMES.some(name => {
+		const base = baseline[name] - Number(bonuses[name]?.bonus || 0);
+		return !Number.isInteger(base) || base < 17 || base > 27;
+	})) throw new Error('Unable to determine attributes without temporary boosters.');
+	return buildQuickestSkillsToV(skills.skills, baseline);
+};
+
 
 async function getSkillEnables(typeId) {
 	const index = await getSkillEnablesIndex();

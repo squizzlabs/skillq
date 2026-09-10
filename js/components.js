@@ -149,7 +149,7 @@ function _skillQueueClipboardText(queue) {
 	}).join('\n');
 }
 
-function _showSkillQueueOptimizationModal(queue, warnings = []) {
+function _showSkillQueueOptimizationModal(queue, warnings = [], heading = 'Optimized Skill Queue') {
 	const backdrop = _el('div', 'sq-modal-backdrop');
 	const dialog = _el('div', 'sq-modal');
 	dialog.setAttribute('role', 'dialog');
@@ -157,12 +157,12 @@ function _showSkillQueueOptimizationModal(queue, warnings = []) {
 	dialog.setAttribute('aria-labelledby', 'sq-queue-modal-title');
 
 	const header = _el('div', 'sq-modal__header');
-	const title = _el('h3', 'sq-modal__title', 'Optimized Skill Queue');
+	const title = _el('h3', 'sq-modal__title', heading);
 	title.id = 'sq-queue-modal-title';
 	header.appendChild(title);
 	const close = _el('button', 'sq-modal__close', '×');
 	close.type = 'button';
-	close.setAttribute('aria-label', 'Close optimized queue');
+	close.setAttribute('aria-label', 'Close ' + heading);
 	header.appendChild(close);
 	dialog.appendChild(header);
 
@@ -170,7 +170,7 @@ function _showSkillQueueOptimizationModal(queue, warnings = []) {
 	const text = document.createElement('textarea');
 	text.className = 'sq-modal__textarea';
 	text.readOnly = true;
-	text.setAttribute('aria-label', 'Optimized skill queue');
+	text.setAttribute('aria-label', heading);
 	text.value = _skillQueueClipboardText(queue);
 	dialog.appendChild(text);
 
@@ -619,6 +619,7 @@ function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP 
 			section.querySelectorAll('.sq-skill-row').forEach(r => r.hidden = false);
 			section.querySelectorAll('.sq-skill-row--v').forEach(r => r.hidden = true);
 		});
+
 		section.appendChild(controls);
 
 		// Group skills by groupID
@@ -835,7 +836,7 @@ function renderCharClones({ clones = [] } = {}) {
  *                 secondaryAttribute, skillPoints, training, queue }]
  * optimize: { rows, sampleSize, currentSeconds, optimizedSeconds, savedSeconds, savedPercent }
  */
-function renderCharTrain({ implants = [], suggestions = [], optimize = null } = {}) {
+function renderCharTrain({ characterId, implants = [], suggestions = [], optimize = null } = {}) {
 	const el = _el('div', 'sq-train');
 
 	const topPanels = _el('div', 'sq-train-top-panels');
@@ -943,6 +944,23 @@ function renderCharTrain({ implants = [], suggestions = [], optimize = null } = 
 	addCtrl('Show All',      () => section.querySelectorAll('.sq-skill-row').forEach(r => r.hidden = false));
 	addCtrl('Hide Untrained',() => section.querySelectorAll('.sq-skill-row--untrained').forEach(r => r.hidden = true));
 	addCtrl('Hide Trained',  () => section.querySelectorAll('.sq-skill-row--trained').forEach(r => r.hidden = true));
+	if (characterId) {
+		const quickest = _el('button', 'sq-btn sq-btn--primary sq-btn--sm', 'Export');
+		quickest.style.marginLeft = 'auto';
+		quickest.type = 'button';
+		quickest.addEventListener('click', async () => {
+			quickest.disabled = true;
+			try {
+				const rows = await window.quickestSkillsToV(characterId);
+				_showSkillQueueOptimizationModal(rows, [], 'Quickest to V');
+			} catch (error) {
+				window.alert(error.message);
+			} finally {
+				quickest.disabled = false;
+			}
+		});
+		controls.appendChild(quickest);
+	}
 	section.appendChild(controls);
 
 	const table = document.createElement('table');
