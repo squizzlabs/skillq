@@ -198,7 +198,7 @@ class SimpleESI {
 			await this.lsSet('whoami', this.whoami);
 			await this.lsSet('authed_json', json, this.whoami.character_id);
 			if (json.expires_in) {
-				await this.lsSet('access_token', json.access_token, this.whoami.character_id, 1000 * (json.expires_in - 2));
+				await this.lsSet('access_token', `${btoa(navigator.userAgent + navigator.language)}::${json.access_token}`, this.whoami.character_id, 1000 * (json.expires_in - 2));
 			}
 			await this.store.delete('simpleesi-global-loggedout');
 			await this.store.delete('simpleesi-global-state');
@@ -625,8 +625,13 @@ class SimpleESI {
 			}
 			this._locks[lockKey] = true;
 
-			if (await this.lsGet('access_token', character_id) === 'undefined') await this.lsDel('access_token', character_id);
-			let current_access_token = await this.lsGet('access_token', character_id);
+			const clientBinding = btoa(navigator.userAgent + navigator.language);
+			let storedAccessToken = await this.lsGet('access_token', character_id);
+			if (storedAccessToken === 'undefined' || (storedAccessToken && !storedAccessToken.startsWith(`${clientBinding}::`))) {
+				await this.lsDel('access_token', character_id);
+				storedAccessToken = null;
+			}
+			let current_access_token = storedAccessToken ? storedAccessToken.slice(clientBinding.length + 2) : null;
 			if (current_access_token === null) {
 				let authed_json = await this.lsGet('authed_json', character_id);
 				if (authed_json === null) {
@@ -679,7 +684,7 @@ class SimpleESI {
 					refresh_token: json.refresh_token || authed_json.refresh_token
 				};
 				await this.lsSet('authed_json', nextAuthedJson, character_id);
-				await this.lsSet('access_token', json.access_token, character_id, 1000 * (json.expires_in - 2));
+				await this.lsSet('access_token', `${btoa(navigator.userAgent + navigator.language)}::${json.access_token}`, character_id, 1000 * (json.expires_in - 2));
 			}
 			return current_access_token;
 		} finally {
