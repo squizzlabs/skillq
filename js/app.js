@@ -1578,18 +1578,26 @@ async function renderSharedCharacterPage() {
 		const snapshotText = snapshotUnix > 0
 			? `Snapshot taken at ${formatDateTime(snapshotUnix * 1000)} UTC. `
 			: '';
-		notice.innerHTML = `
-			<ul>
-				<li>${snapshotText}</li>
-				<li>Only first 25 skills in skill queue are shown.</li>
-				<li>Skills considered completed are not shown in Skill Queue.</li>
-				${encodedJumpClones ? '<li>Jump clones and their implants were included by the owner.</li>' : ''}
-				${encodedNotes ? '<li>Character notes were included by the owner.</li>' : ''}
-				<li>Share links invalidate if the character changes corporations.</li>
-				<li>Share links expire after 30 days.</li>
-				<li>A crafty person <em>could</em> tamper with the URL to share fake character data.</li>
-			</ul>
-		`;
+		const noticeList = document.createElement('ul');
+		const addNotice = (text, className = null) => {
+			const item = document.createElement('li');
+			if (className) item.appendChild(_el('em', className, text));
+			else item.textContent = text;
+			noticeList.appendChild(item);
+		};
+		addNotice(snapshotText);
+		addNotice('Only first 25 skills in skill queue are shown.');
+		addNotice('Skills considered completed are not shown in Skill Queue.');
+		if (encodedJumpClones) addNotice('Jump clones and their implants were included by the owner.');
+		if (encodedNotes) addNotice('Character notes were included by the owner.');
+		addNotice('Share links invalidate if the character changes corporations.');
+		addNotice('Share links expire after 30 days.');
+		const lastNotice = document.createElement('li');
+		lastNotice.appendChild(document.createTextNode('A crafty person '));
+		lastNotice.appendChild(_el('em', null, 'could'));
+		lastNotice.appendChild(document.createTextNode(' tamper with the URL to share fake character data.'));
+		noticeList.appendChild(lastNotice);
+		notice.appendChild(noticeList);
 		page.appendChild(notice);
 		if (encodedNotes) {
 			page.appendChild(renderSharedCharacterNotes(sharedNotes));
@@ -1798,7 +1806,11 @@ async function renderLoggedInHome() {
 	if (orderedSummaries.length > 1) {
 		const totalIsk = orderedSummaries.reduce((acc, s) => acc + (s.character.balance || 0), 0);
 		const totalSp = orderedSummaries.reduce((acc, s) => acc + (s.character.skillPoints || 0), 0);
-		netSummary.innerHTML = `Net ISK: ${numberFormat(totalIsk, 2)}<br>Net SP: ${numberFormat(totalSp, 0)}`;
+		netSummary.replaceChildren(
+			document.createTextNode(`Net ISK: ${numberFormat(totalIsk, 2)}`),
+			document.createElement('br'),
+			document.createTextNode(`Net SP: ${numberFormat(totalSp, 0)}`)
+		);
 		netSummary.classList.remove('d-none');
 	} else {
 		netSummary.classList.add('d-none');
@@ -2576,7 +2588,11 @@ async function renderItemPage(itemId) {
 	if (typeInfo.description) {
 		const desc = document.createElement('p');
 		desc.className = 'sq-item__description';
-		desc.innerHTML = String(typeInfo.description).replace(/\n/g, '<br>');
+		const descriptionLines = String(typeInfo.description).split('\n');
+		descriptionLines.forEach((line, index) => {
+			if (index > 0) desc.appendChild(document.createElement('br'));
+			desc.appendChild(document.createTextNode(line));
+		});
 		container.appendChild(desc);
 	}
 

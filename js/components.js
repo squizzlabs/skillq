@@ -227,7 +227,8 @@ function _renderSkillQueueSection(queue, skills, { optimized = false, warnings =
 	const section = _el('section', 'sq-queue');
 	const queueHeader = _el('div', 'sq-queue__header');
 	const h4 = _el('h4', 'sq-section-title');
-	h4.innerHTML = `Skill Queue <small>(${queue.length} in queue. All times UTC)</small>`;
+	h4.appendChild(document.createTextNode('Skill Queue '));
+	h4.appendChild(_el('small', null, `(${queue.length} in queue. All times UTC)`));
 	queueHeader.appendChild(h4);
 
 	const controls = _el('div', 'sq-queue__controls');
@@ -602,9 +603,13 @@ function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP 
 		const section = _el('section', 'sq-skill-groups');
 
 		const h4 = _el('h4', 'sq-section-title');
-		h4.innerHTML = `Skills <small>${numberFormat(totalSP, 0)} SP / ${skills.length} Skills${
-			unallocatedSP > 0 ? ` &nbsp;<em class="sq-warn">(${numberFormat(unallocatedSP, 0)} Unallocated SP)</em>` : ''
-		}</small>`;
+		h4.appendChild(document.createTextNode('Skills '));
+		const summary = _el('small', null, `${numberFormat(totalSP, 0)} SP / ${skills.length} Skills`);
+		if (unallocatedSP > 0) {
+			summary.appendChild(document.createTextNode(' '));
+			summary.appendChild(_el('em', 'sq-warn', `(${numberFormat(unallocatedSP, 0)} Unallocated SP)`));
+		}
+		h4.appendChild(summary);
 		section.appendChild(h4);
 
 		// Expand/Collapse controls
@@ -638,7 +643,8 @@ function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP 
 
 			const header = _el('button', 'sq-skill-group__header');
 			header.setAttribute('aria-expanded', 'false');
-			header.innerHTML = `<span>${group.name}</span><em>${numberFormat(group.sp, 0)} SP / ${group.count} Skills</em>`;
+			header.appendChild(_el('span', null, group.name));
+			header.appendChild(_el('em', null, `${numberFormat(group.sp, 0)} SP / ${group.count} Skills`));
 			header.addEventListener('click', () => {
 				const open = header.getAttribute('aria-expanded') === 'true';
 				header.setAttribute('aria-expanded', String(!open));
@@ -852,11 +858,13 @@ function renderCharTrain({ characterId, implants = [], suggestions = [], optimiz
 		const tbody = document.createElement('tbody');
 		for (const attr of implants) {
 			const tr = document.createElement('tr');
-			tr.innerHTML = `
-				<td>${capitalizeFirst(attr.attributeName)}</td>
-				<td>${attr.baseValue} <em>(+${attr.bonus})</em></td>
-				<td>${attr.implantName}</td>
-			`;
+			const attributeTd = _el('td', null, capitalizeFirst(attr.attributeName));
+			const valueTd = _el('td');
+			valueTd.appendChild(document.createTextNode(`${attr.baseValue} `));
+			valueTd.appendChild(_el('em', null, `(+${attr.bonus})`));
+			tr.appendChild(attributeTd);
+			tr.appendChild(valueTd);
+			tr.appendChild(_el('td', null, attr.implantName));
 			tbody.appendChild(tr);
 		}
 		table.appendChild(tbody);
@@ -877,12 +885,16 @@ function renderCharTrain({ characterId, implants = [], suggestions = [], optimiz
 		for (const row of optimize.rows) {
 			const tr = document.createElement('tr');
 			const deltaPrefix = Number(row.deltaPoints || 0) > 0 ? '+' : '';
-			tr.innerHTML = `
-				<td>${capitalizeFirst(row.attributeName)}</td>
-				<td>${Number(row.currentPoints || 0)} pts <em>(${Number(row.currentValue || 0)})</em></td>
-				<td>${Number(row.optimizedPoints || 0)} pts <em>(${Number(row.optimizedValue || 0)})</em></td>
-				<td>${deltaPrefix}${Number(row.deltaPoints || 0)}</td>
-			`;
+			tr.appendChild(_el('td', null, capitalizeFirst(row.attributeName)));
+			const currentTd = _el('td');
+			currentTd.appendChild(document.createTextNode(`${Number(row.currentPoints || 0)} pts `));
+			currentTd.appendChild(_el('em', null, `(${Number(row.currentValue || 0)})`));
+			tr.appendChild(currentTd);
+			const optimizedTd = _el('td');
+			optimizedTd.appendChild(document.createTextNode(`${Number(row.optimizedPoints || 0)} pts `));
+			optimizedTd.appendChild(_el('em', null, `(${Number(row.optimizedValue || 0)})`));
+			tr.appendChild(optimizedTd);
+			tr.appendChild(_el('td', null, `${deltaPrefix}${Number(row.deltaPoints || 0)}`));
 			tbody.appendChild(tr);
 		}
 
@@ -1004,7 +1016,8 @@ function renderSharedCharSkills({ queue = [], skills = [], totalSP = 0, hasShare
 
 	const trainingSection = _el('section', 'sq-queue');
 	const trainingHeader = _el('h4', 'sq-section-title');
-	trainingHeader.innerHTML = `Skill Queue <small>(${visibleQueue.length} in queue. All times UTC)</small>`;
+	trainingHeader.appendChild(document.createTextNode('Skill Queue '));
+	trainingHeader.appendChild(_el('small', null, `(${visibleQueue.length} in queue. All times UTC)`));
 	trainingSection.appendChild(trainingHeader);
 
 	if (visibleQueue.length === 0) {
@@ -1056,7 +1069,8 @@ function renderSharedCharSkills({ queue = [], skills = [], totalSP = 0, hasShare
 	const section = _el('section', 'sq-skill-groups');
 	const heading = _el('h4', 'sq-section-title');
 	const totalSpSummary = hasSharedTotalSP ? `${numberFormat(totalSP, 0)} SP / ` : 'Total SP not included / ';
-	heading.innerHTML = `Shared Skills <small>${totalSpSummary}${skills.length} Skills</small>`;
+	heading.appendChild(document.createTextNode('Shared Skills '));
+	heading.appendChild(_el('small', null, `${totalSpSummary}${skills.length} Skills`));
 	section.appendChild(heading);
 
 	if (skills.length === 0) {
@@ -1094,7 +1108,8 @@ function renderSharedCharSkills({ queue = [], skills = [], totalSP = 0, hasShare
 		const groupEl = _el('div', 'sq-skill-group');
 		const header = _el('button', 'sq-skill-group__header');
 		header.setAttribute('aria-expanded', 'false');
-		header.innerHTML = `<span>${group.name}</span><em>${group.count} Skills</em>`;
+		header.appendChild(_el('span', null, group.name));
+		header.appendChild(_el('em', null, `${group.count} Skills`));
 		header.addEventListener('click', () => {
 			const open = header.getAttribute('aria-expanded') === 'true';
 			header.setAttribute('aria-expanded', String(!open));
