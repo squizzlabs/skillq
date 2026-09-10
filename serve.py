@@ -41,6 +41,12 @@ class SpaFallbackHandler(SimpleHTTPRequestHandler):
         "/logout",
     }
 
+    def end_headers(self):
+        # Local development assets use the deployment placeholder hash, so a
+        # browser can otherwise keep serving an older JS bundle indefinitely.
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def serve_404_page(self):
         fallback_path = Path(self.directory) / "404.html"
         if not fallback_path.is_file():

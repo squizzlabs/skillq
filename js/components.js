@@ -135,6 +135,166 @@ function toRomanNumeral(n) {
 	return map[Math.min(5, Math.max(0, Math.floor(n || 0)))] || '';
 }
 
+function _queueDateMs(entry, field) {
+	const value = entry?.[field];
+	if (!value) return 0;
+	const parsed = Date.parse(value);
+	return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function _skillQueueClipboardText(queue) {
+	return (Array.isArray(queue) ? queue : []).map((skill) => {
+		const level = Number(skill.level || skill.targetLevel || skill.finished_level || skill.finishedLevel || skill.target_level || 1);
+		return `${skill.typeName} ${Math.min(5, Math.max(1, level))}`;
+	}).join('\n');
+}
+
+function _showSkillQueueOptimizationModal(queue, warnings = [], heading = 'Optimized Skill Queue') {
+	const backdrop = _el('div', 'sq-modal-backdrop');
+	const dialog = _el('div', 'sq-modal');
+	dialog.setAttribute('role', 'dialog');
+	dialog.setAttribute('aria-modal', 'true');
+	dialog.setAttribute('aria-labelledby', 'sq-queue-modal-title');
+
+	const header = _el('div', 'sq-modal__header');
+	const title = _el('h3', 'sq-modal__title', heading);
+	title.id = 'sq-queue-modal-title';
+	header.appendChild(title);
+	const close = _el('button', 'sq-modal__close', '×');
+	close.type = 'button';
+	close.setAttribute('aria-label', 'Close ' + heading);
+	header.appendChild(close);
+	dialog.appendChild(header);
+
+	dialog.appendChild(_el('p', 'sq-muted', 'Copy this list, then import it into EVE Online to rebuild your queue in the optimized order. Training times use current attributes and implants, temporary boosters are excluded'));
+	const text = document.createElement('textarea');
+	text.className = 'sq-modal__textarea';
+	text.readOnly = true;
+	text.setAttribute('aria-label', heading);
+	text.value = _skillQueueClipboardText(queue);
+	dialog.appendChild(text);
+
+	const actions = _el('div', 'sq-modal__actions');
+	const copy = _el('button', 'sq-btn sq-btn--primary', 'Copy to Clipboard');
+	copy.type = 'button';
+	copy.addEventListener('click', async () => {
+		try {
+			if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text.value);
+			else {
+				text.focus();
+				text.select();
+				document.execCommand('copy');
+			}
+			copy.textContent = 'Copied!';
+			setTimeout(() => { copy.textContent = 'Copy to Clipboard'; }, 1800);
+		} catch (_) {
+			text.focus();
+			text.select();
+			copy.textContent = 'Select text and copy';
+		}
+	});
+	actions.appendChild(copy);
+	dialog.appendChild(actions);
+
+	const instructions = _el('div', 'sq-modal__instructions');
+	instructions.appendChild(_el('strong', null, 'Import in EVE Online'));
+	const list = document.createElement('ol');
+	for (const step of [
+		'Open the Skills window in-game.',
+		'Open the Skill Queue menu (the three-line menu near the queue).',
+		'Choose Import from Clipboard, then confirm the skills to add.'
+	]) list.appendChild(_el('li', null, step));
+	instructions.appendChild(list);
+	instructions.appendChild(_el('p', 'sq-muted', 'EVE will validate skill books and prerequisites during import. The active skill may be skipped if it is already training.'));
+	for (const warning of warnings) instructions.appendChild(_el('p', 'sq-queue__warning', warning));
+	dialog.appendChild(instructions);
+
+	const closeModal = () => {
+		 document.removeEventListener('keydown', onKeyDown);
+		 backdrop.remove();
+	};
+	const onKeyDown = (event) => { if (event.key === 'Escape') closeModal(); };
+	close.addEventListener('click', closeModal);
+	backdrop.addEventListener('click', (event) => { if (event.target === backdrop) closeModal(); });
+	document.addEventListener('keydown', onKeyDown);
+	backdrop.appendChild(dialog);
+	document.body.appendChild(backdrop);
+	text.focus();
+	text.select();
+}
+
+function _renderSkillQueueSection(queue, skills, { optimized = false, warnings = [] } = {}) {
+	const section = _el('section', 'sq-queue');
+	const queueHeader = _el('div', 'sq-queue__header');
+	const h4 = _el('h4', 'sq-section-title');
+	h4.innerHTML = `Skill Queue <small>(${queue.length} in queue. All times UTC)</small>`;
+	queueHeader.appendChild(h4);
+
+	const controls = _el('div', 'sq-queue__controls');
+	const optimizeButton = _el('button', 'sq-btn sq-btn--primary sq-btn--sm', 'Optimze');
+	optimizeButton.type = 'button';
+	optimizeButton.title = 'Order queued skills by shortest training time while keeping prerequisites ahead of dependents.';
+	optimizeButton.addEventListener('click', async () => {
+		optimizeButton.disabled = true;
+		optimizeButton.textContent = 'Optimizing...';
+		try {
+			const result = await window.optimizeSkillQueueOrder(queue, skills);
+			section.replaceWith(_renderSkillQueueSection(result.queue, skills, {
+				optimized: true,
+				warnings: result.warnings
+			}));
+			_showSkillQueueOptimizationModal(result.queue, result.warnings);
+		} catch (error) {
+			console.warn('Unable to optimize skill queue.', error);
+			optimizeButton.disabled = false;
+			optimizeButton.textContent = 'Optimze';
+		}
+	});
+	controls.appendChild(optimizeButton);
+	queueHeader.appendChild(controls);
+	section.appendChild(queueHeader);
+	for (const warning of warnings) section.appendChild(_el('p', 'sq-muted sq-queue__warning', warning));
+
+	const table = document.createElement('table');
+	table.className = 'sq-table sq-table--striped';
+	const thead = document.createElement('thead');
+	thead.innerHTML = '<tr><th>Skill <small class="sq-queue-sp-needed">SP remaining to complete skill</small></th><th>Group</th><th>Start</th><th>End</th><th>SP/h</th></tr>';
+	const tbody = document.createElement('tbody');
+	const now = Date.now();
+	const computeQueueSpNeeded = (skill) => {
+		const explicit = Number(skill?.spNeeded);
+		if (Number.isFinite(explicit) && explicit > 0) return Math.ceil(explicit);
+		const startMs = _queueDateMs(skill, 'startDate');
+		const endMs = _queueDateMs(skill, 'endDate');
+		const spHour = Number(skill?.spHour || 0);
+		if (!startMs || !endMs || endMs <= startMs || spHour <= 0) return 0;
+		return Math.max(0, Math.ceil(spHour * ((endMs - Math.max(now, startMs)) / 3600000)));
+	};
+	for (const skill of queue) {
+		const tr = document.createElement('tr');
+		const queueLevel = Number(skill.level || skill.targetLevel || skill.finished_level || skill.finishedLevel || skill.target_level || 0);
+		const skillTd = document.createElement('td');
+		skillTd.dataset.label = 'Skill';
+		skillTd.appendChild(_a(`/item/${skill.typeID}/`, skill.typeName + (queueLevel ? ` ${toRomanNumeral(queueLevel)}` : '')));
+		if (skill.hasTrainingBooster) skillTd.appendChild(_el('span', null, ' '));
+		if (skill.hasTrainingBooster) skillTd.appendChild(_boosterBadge());
+		const spNeeded = computeQueueSpNeeded(skill);
+		if (spNeeded > 0) skillTd.appendChild(_el('small', 'sq-queue-sp-needed', ` ${numberFormat(spNeeded, 0)}`));
+		tr.appendChild(skillTd);
+		for (const [label, value] of [['Group', skill.groupName || ''], ['Start', skill.startDate ? formatDateTime(skill.startDate) : (skill.startTime || '')], ['End', skill.endDate ? formatDateTime(skill.endDate) : (skill.endTime || '')], ['SP/h', numberFormat(skill.spHour, 0)]]) {
+			const td = document.createElement('td');
+			td.dataset.label = label;
+			td.textContent = value;
+			tr.appendChild(td);
+		}
+		tbody.appendChild(tr);
+	}
+	table.appendChild(thead);
+	table.appendChild(tbody);
+	section.appendChild(table);
+	return section;
+}
+
 function encodeCharacterNameForPath(name) {
 	return encodeURIComponent(String(name || '')).replace(/%20/g, '+');
 }
@@ -386,7 +546,7 @@ function renderCharInfo({ character, corporation = null, alliance = null, traini
  * renderCharMenu({ charName, activeTab })
  *
  * charName:  plain character name (will be URI-encoded)
- * activeTab: 'overview' | 'wallet' | 'train' | 'clones' | 'notes'
+	 * activeTab: 'overview' | 'wallet' | 'train' | 'research' | 'clones' | 'notes'
  */
 function renderCharMenu({ charName, activeTab = 'overview' } = {}) {
 	const encoded = encodeCharacterNameForPath(charName);
@@ -394,6 +554,7 @@ function renderCharMenu({ charName, activeTab = 'overview' } = {}) {
 		{ id: 'overview', label: 'Overview', href: `/char/${encoded}/` },
 		{ id: 'wallet',   label: 'Wallet',   href: `/char/${encoded}/wallet/` },
 		{ id: 'train',    label: 'Train',    href: `/char/${encoded}/train/` },
+		{ id: 'plan',     label: 'Plan',     href: `/char/${encoded}/plan/` },
 		{ id: 'clones',   label: 'Clones',   href: `/char/${encoded}/clones/` },
 		{ id: 'notes',    label: 'Notes',    href: `/char/${encoded}/notes/` },
 	];
@@ -425,92 +586,14 @@ function renderCharMenu({ charName, activeTab = 'overview' } = {}) {
 function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP = 0 } = {}) {
 	const el = _el('div', 'sq-skills');
 	const now = Date.now();
-	const computeQueueSpNeeded = (skill) => {
-		const explicit = Number(skill?.spNeeded);
-		if (Number.isFinite(explicit) && explicit > 0) return Math.ceil(explicit);
-
-		const startMs = skill?.startDate ? (Date.parse(skill.startDate) || 0) : 0;
-		const endMs = skill?.endDate ? (Date.parse(skill.endDate) || 0) : 0;
-		const spHour = Number(skill?.spHour || 0);
-		if (!startMs || !endMs || endMs <= startMs || spHour <= 0) return 0;
-
-		const effectiveStart = Math.max(now, startMs);
-		if (endMs <= effectiveStart) return 0;
-		const remainingHours = (endMs - effectiveStart) / 3600000;
-		return Math.max(0, Math.ceil(spHour * remainingHours));
-	};
 	const visibleQueue = (queue || []).filter((entry) => {
-		const endMs = entry?.endDate ? (Date.parse(entry.endDate) || 0) : 0;
+		const endMs = _queueDateMs(entry, 'endDate');
 		return endMs <= 0 || endMs > now;
 	});
 
 	/* ── Skill Queue ── */
 	if (visibleQueue.length > 0) {
-		const section = _el('section', 'sq-queue');
-		const h4 = _el('h4', 'sq-section-title');
-		h4.innerHTML = `Skill Queue <small>(${visibleQueue.length} in queue. All times UTC)</small>`;
-		section.appendChild(h4);
-
-		const table = document.createElement('table');
-		table.className = 'sq-table sq-table--striped';
-		const thead = document.createElement('thead');
-		thead.innerHTML = '<tr><th>Skill <small class="sq-queue-sp-needed">SP remaining to complete skill</small></th><th>Group</th><th>Start</th><th>End</th><th>SP/h</th></tr>';
-		const tbody = document.createElement('tbody');
-		for (const skill of visibleQueue) {
-			const tr = document.createElement('tr');
-			const queueLevel = Number(
-				skill.level
-				|| skill.targetLevel
-				|| skill.finished_level
-				|| skill.finishedLevel
-				|| skill.target_level
-				|| 0
-			);
-
-			const skillTd = document.createElement('td');
-			skillTd.dataset.label = 'Skill';
-			const skillLink = document.createElement('a');
-			skillLink.href = `/item/${skill.typeID}/`;
-			skillLink.textContent = skill.typeName + (queueLevel ? ` ${toRomanNumeral(queueLevel)}` : '');
-			skillTd.appendChild(skillLink);
-			if (skill.hasTrainingBooster) {
-				skillTd.appendChild(_el('span', null, ' '));
-				skillTd.appendChild(_boosterBadge());
-			}
-			const spNeeded = computeQueueSpNeeded(skill);
-			if (spNeeded > 0) {
-				const spNeededSmall = document.createElement('small');
-				spNeededSmall.className = 'sq-queue-sp-needed';
-				spNeededSmall.textContent = ` ${numberFormat(spNeeded, 0)}`;
-				skillTd.appendChild(spNeededSmall);
-			}
-			tr.appendChild(skillTd);
-
-			const groupTd = document.createElement('td');
-			groupTd.dataset.label = 'Group';
-			groupTd.textContent = skill.groupName || '';
-			tr.appendChild(groupTd);
-
-			const startTd = document.createElement('td');
-			startTd.dataset.label = 'Start';
-			startTd.textContent = skill.startDate ? formatDateTime(skill.startDate) : (skill.startTime || '');
-			tr.appendChild(startTd);
-
-			const endTd = document.createElement('td');
-			endTd.dataset.label = 'End';
-			endTd.textContent = skill.endDate ? formatDateTime(skill.endDate) : (skill.endTime || '');
-			tr.appendChild(endTd);
-
-			const spTd = document.createElement('td');
-			spTd.dataset.label = 'SP/h';
-			spTd.textContent = numberFormat(skill.spHour, 0);
-			tr.appendChild(spTd);
-
-			tbody.appendChild(tr);
-		}
-		table.appendChild(thead);
-		table.appendChild(tbody);
-		section.appendChild(table);
+		const section = _renderSkillQueueSection(visibleQueue, skills);
 		el.appendChild(section);
 	}
 
@@ -537,6 +620,7 @@ function renderCharSkills({ queue = [], skills = [], totalSP = 0, unallocatedSP 
 			section.querySelectorAll('.sq-skill-row').forEach(r => r.hidden = false);
 			section.querySelectorAll('.sq-skill-row--v').forEach(r => r.hidden = true);
 		});
+
 		section.appendChild(controls);
 
 		// Group skills by groupID
@@ -753,7 +837,7 @@ function renderCharClones({ clones = [] } = {}) {
  *                 secondaryAttribute, skillPoints, training, queue }]
  * optimize: { rows, sampleSize, currentSeconds, optimizedSeconds, savedSeconds, savedPercent }
  */
-function renderCharTrain({ implants = [], suggestions = [], optimize = null } = {}) {
+function renderCharTrain({ characterId, implants = [], suggestions = [], optimize = null } = {}) {
 	const el = _el('div', 'sq-train');
 
 	const topPanels = _el('div', 'sq-train-top-panels');
@@ -861,6 +945,23 @@ function renderCharTrain({ implants = [], suggestions = [], optimize = null } = 
 	addCtrl('Show All',      () => section.querySelectorAll('.sq-skill-row').forEach(r => r.hidden = false));
 	addCtrl('Hide Untrained',() => section.querySelectorAll('.sq-skill-row--untrained').forEach(r => r.hidden = true));
 	addCtrl('Hide Trained',  () => section.querySelectorAll('.sq-skill-row--trained').forEach(r => r.hidden = true));
+	if (characterId) {
+		const quickest = _el('button', 'sq-btn sq-btn--primary sq-btn--sm', 'Export');
+		quickest.style.marginLeft = 'auto';
+		quickest.type = 'button';
+		quickest.addEventListener('click', async () => {
+			quickest.disabled = true;
+			try {
+				const rows = await window.quickestSkillsToV(characterId);
+				_showSkillQueueOptimizationModal(rows, [], 'Quickest to V');
+			} catch (error) {
+				window.alert(error.message);
+			} finally {
+				quickest.disabled = false;
+			}
+		});
+		controls.appendChild(quickest);
+	}
 	section.appendChild(controls);
 
 	const table = document.createElement('table');

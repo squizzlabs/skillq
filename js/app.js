@@ -56,8 +56,8 @@ const SHARE_SECTION_KEYS = {
 	jumpClones: 'jumpClones',
 	notes: 'notes'
 };
-let githubhash = "29b555b";
-const staticCacheHash = window.location.hostname === 'localhost' ? Date.now() : '29b555b';
+let githubhash = "479f687";
+const staticCacheHash = window.location.hostname === 'localhost' ? Date.now() : '479f687';
 let layoutMode = 'restricted';
 let themeMode = 'dark';
 
@@ -1819,7 +1819,7 @@ async function renderCharacterPage(charName, tab = 'overview') {
 
 	await window.esi.changeCharacter(String(matched.character_id));
 	const characterId = String(window.esi.whoami.character_id);
-	const activeTab = ['overview', 'wallet', 'train', 'clones', 'notes'].includes(tab) ? tab : 'overview';
+	const activeTab = ['overview', 'wallet', 'train', 'plan', 'clones', 'notes'].includes(tab) ? tab : 'overview';
 	const data = await loadCharacterPageDataFromCache(characterId, activeTab);
 	const orderedCharacters = await getOrderedCharactersForNavbar(characters);
 
@@ -1923,6 +1923,7 @@ async function renderCharacterPage(charName, tab = 'overview') {
 		const existingContent = page.querySelector('[data-role="char-tab-content"]');
 		if (existingContent) existingContent.replaceWith(nextContent);
 	}
+	page.classList.toggle('sq-char-view--research', activeTab === 'plan');
 
 	document.getElementById('about').classList.add('d-none');
 	document.getElementById('skillq').classList.remove('d-none');
@@ -2091,6 +2092,7 @@ function renderSharedCharacterNotes(note) {
 
 function buildCharacterTabContent(data, activeTab) {
 	const content = document.createElement('div');
+	if (activeTab === 'plan') return renderCharPlan(data.character.character_id);
 	if (activeTab === 'notes') {
 		content.appendChild(renderCharacterNotesEditor({
 			characterId: data.character?.character_id,
@@ -2113,7 +2115,7 @@ function buildCharacterTabContent(data, activeTab) {
 
 	if (activeTab === 'train') {
 		content.appendChild(renderCharTrain({
-			implants: data.implants || [],
+			characterId: data.character?.character_id,			implants: data.implants || [],
 			suggestions: data.suggestions || [],
 			optimize: data.optimize || null
 		}));
@@ -2736,7 +2738,10 @@ function _extractRequirementRows(typeInfo) {
 	const pairs = [
 		{ skillAttrId: 182, levelAttrId: 277 },
 		{ skillAttrId: 183, levelAttrId: 278 },
-		{ skillAttrId: 184, levelAttrId: 279 }
+		{ skillAttrId: 184, levelAttrId: 279 },
+		{ skillAttrId: 1285, levelAttrId: 1286 },
+		{ skillAttrId: 1289, levelAttrId: 1287 },
+		{ skillAttrId: 1290, levelAttrId: 1288 }
 	];
 
 	return pairs.map(({ skillAttrId, levelAttrId }) => ({
@@ -2767,6 +2772,506 @@ async function getItemRequirements(typeId, visited = new Set(), depth = 0) {
 	}
 
 	return rows;
+}
+
+/**
+ * Produce a fastest-first preview of the current queue without changing EVE.
+ * A prerequisite that is also in the queue is always scheduled before the
+ * queued skill that needs it. Skills already trained to the required level do
+ * not create a dependency.
+ */
+async function optimizeSkillQueueOrder(queue = [], skills = []) {
+	const rows = Array.isArray(queue) ? queue.map((entry, index) => ({ entry, index })) : [];
+	if (rows.length < 2) return { queue: rows.map((row) => row.entry), warnings: [] };
+
+	const currentLevels = new Map((Array.isArray(skills) ? skills : []).map((skill) => [
+		Number(skill?.typeID || skill?.skill_id || 0), Number(skill?.level || skill?.trained_skill_level || 0)
+	]));
+	const skillByTypeId = new Map((Array.isArray(skills) ? skills : []).map((skill) => [Number(skill?.typeID || skill?.skill_id || 0), skill]));
+	const infoByTypeId = new Map();
+	const requirementByTypeId = new Map();
+	await Promise.all(rows.map(async ({ entry }) => {
+		const typeId = Number(entry?.typeID || 0);
+		if (!typeId || infoByTypeId.has(typeId)) return;
+		infoByTypeId.set(typeId, await getTypeInfo(typeId));
+		try {
+			requirementByTypeId.set(typeId, await getItemRequirements(typeId));
+		} catch (_) {
+			requirementByTypeId.set(typeId, []);
+		}
+	}));
+
+	const targetLevel = (entry) => Number(entry?.level || entry?.targetLevel || entry?.finished_level || entry?.finishedLevel || entry?.target_level || 0);
+	const remainingSp = (entry) => {
+		const explicit = Number(entry?.spNeeded || 0);
+		if (explicit > 0) return explicit;
+		const skill = skillByTypeId.get(Number(entry?.typeID || 0));
+		const target = targetLevel(entry);
+		const rank = Number(skill?.skillRank || 0);
+		if (skill && target > 0 && rank > 0) {
+			return Math.max(0, getSkillPointsForLevel(target, rank) - Number(skill.skillPoints || 0));
+		}
+		return 0;
+	};
+	const durationSeconds = (entry) => {
+		const spNeeded = remainingSp(entry);
+		// expectedSpHour is based on the character's current effective attributes (including
+		// implants) and intentionally excludes temporary booster speed.
+		const spHour = Number(entry?.expectedSpHour || entry?.spHour || 0);
+		if (spNeeded > 0 && spHour > 0) return spNeeded / spHour * 3600;
+		return Number.MAX_SAFE_INTEGER;
+	};
+	const active = rows.filter(({ entry }) => {
+		const startMs = _queueDateMs(entry, 'startDate');
+		const endMs = _queueDateMs(entry, 'endDate');
+		return startMs > 0 && endMs > Date.now() && startMs <= Date.now();
+	});
+	const activeSet = new Set(active.map(({ index }) => index));
+	const pending = rows.filter(({ index }) => !activeSet.has(index));
+	const byType = new Map();
+	for (const row of rows) {
+		const typeId = Number(row.entry?.typeID || 0);
+		if (!byType.has(typeId)) byType.set(typeId, []);
+		byType.get(typeId).push(row);
+	}
+
+	const dependencies = new Map(pending.map(({ index }) => [index, new Set()]));
+	const warnings = [];
+	for (const dependent of pending) {
+		const dependentId = Number(dependent.entry?.typeID || 0);
+		const requirements = requirementByTypeId.get(dependentId) || [];
+		for (const requirement of requirements) {
+			const requiredId = Number(requirement?.typeID || 0);
+			const requiredLevel = Number(requirement?.requiredSkillLevel || 0);
+			if (!requiredId || !requiredLevel || requiredId === dependentId) continue;
+			if (Number(currentLevels.get(requiredId) || 0) >= requiredLevel) continue;
+			const candidates = (byType.get(requiredId) || [])
+				.filter((row) => targetLevel(row.entry) >= requiredLevel)
+				.sort((left, right) => targetLevel(left.entry) - targetLevel(right.entry) || left.index - right.index);
+			if (activeSet.has(dependent.index)) {
+				if (candidates.some((row) => !activeSet.has(row.index))) {
+					const requiredInfo = await getTypeInfo(requiredId);
+					warnings.push(`Current training ${dependent.entry?.typeName || `Skill ${dependentId}`} depends on ${requiredInfo?.name || `Skill ${requiredId}`} ${toRomanNumeral(requiredLevel)} later in the queue; EVE must be corrected manually.`);
+				}
+				continue;
+			}
+			if (candidates.some((row) => activeSet.has(row.index))) continue;
+			if (candidates.length === 0) {
+				const requiredInfo = await getTypeInfo(requiredId);
+				warnings.push(`${dependent.entry?.typeName || `Skill ${dependentId}`} needs ${requiredInfo?.name || `Skill ${requiredId}`} ${toRomanNumeral(requiredLevel)}, which is not in the current queue.`);
+				continue;
+			}
+			const prerequisite = candidates[0];
+			dependencies.get(dependent.index).add(prerequisite.index);
+		}
+	}
+
+	const orderedPending = [];
+	if (pending.some(({ entry }) => durationSeconds(entry) === Number.MAX_SAFE_INTEGER)) {
+		warnings.push('Some queue entries have no measured SP/hour rate, so they were placed after rate-known skills.');
+	}
+	const remaining = new Set(pending.map(({ index }) => index));
+	while (remaining.size > 0) {
+		const ready = pending.filter(({ index }) => remaining.has(index) && Array.from(dependencies.get(index)).every((dependency) => !remaining.has(dependency)));
+		if (ready.length === 0) {
+			warnings.push('A prerequisite cycle or incomplete requirement data was detected; the remaining skills kept their current order.');
+			orderedPending.push(...pending.filter(({ index }) => remaining.has(index)));
+			break;
+		}
+		ready.sort((left, right) => durationSeconds(left.entry) - durationSeconds(right.entry) || left.index - right.index);
+		const next = ready[0];
+		orderedPending.push(next);
+		remaining.delete(next.index);
+	}
+
+	return {
+		queue: active.concat(orderedPending).map((row) => row.entry),
+		warnings: Array.from(new Set(warnings))
+	};
+}
+
+window.optimizeSkillQueueOrder = optimizeSkillQueueOrder;
+
+async function buildQuickestSkillsToV(skills, attributes, goals = null) {
+	const levels = new Map(skills.map(skill => [Number(skill.skill_id), Number(skill.trained_skill_level || 0)]));
+	const points = new Map(skills.map(skill => [Number(skill.skill_id), Number(skill.skillpoints_in_skill || 0)]));
+	const targets = goals ? new Map(goals.map(row => [row.typeID, row.requiredSkillLevel])) : new Map(skills.filter(skill => Number(skill.trained_skill_level || 0) < 5).map(skill => [Number(skill.skill_id), 5]));
+	const infos = new Map();
+	const queue = [];
+	// Each candidate includes its complete prerequisite path from the planned state.
+	const plan = async (id, level, planned, visiting, rows) => {
+		if ((planned.get(id) ?? levels.get(id) ?? 0) >= level) return;
+		if (visiting.has(id)) throw new Error('Cyclic skill requirements.');
+		visiting.add(id);
+		if (!infos.has(id)) infos.set(id, await getTypeInfo(id));
+		const info = infos.get(id);
+		const rank = _getDogmaValue(info, 275);
+		const rate = calculateSkillSpPerHour(attributes, attributeIdToName(_getDogmaValue(info, 180)), attributeIdToName(_getDogmaValue(info, 181)));
+		if (!(rank > 0) || !(rate > 0)) throw new Error('Missing training data for ' + (info?.name || id));
+		for (const requirement of _extractRequirementRows(info)) {
+			await plan(requirement.typeID, requirement.requiredSkillLevel, planned, visiting, rows);
+		}
+		const currentLevel = planned.get(id) ?? levels.get(id) ?? 0;
+		for (let next = currentLevel + 1; next <= level; next++) {
+			const start = Math.max(points.get(id) || 0, getSkillPointsForLevel(next - 1, rank));
+			const spNeeded = Math.max(0, getSkillPointsForLevel(next, rank) - start);
+			rows.push({ typeID: id, typeName: info.name, level: next, spNeeded, expectedSpHour: rate });
+		}
+		planned.set(id, level);
+		visiting.delete(id);
+	};
+	while (targets.size) {
+		let best;
+		for (const [id, targetLevel] of targets) {
+			if (levels.get(id) >= targetLevel) { targets.delete(id); continue; }
+			const rows = [];
+			await plan(id, targetLevel, new Map(), new Set(), rows);
+			const seconds = rows.reduce((total, row) => total + row.spNeeded / row.expectedSpHour * 3600, 0);
+			if (!best || seconds < best.seconds || (seconds === best.seconds && infos.get(id).name.localeCompare(infos.get(best.id).name) < 0)) best = { id, rows, seconds };
+		}
+		if (!best) break;
+		queue.push(...best.rows);
+		for (const row of best.rows) levels.set(row.typeID, row.level);
+		targets.delete(best.id);
+	}
+	return queue;
+}
+
+async function getCharacterTrainingContext(characterId) {
+	const [skills, attributes, implants] = await Promise.all([
+		fetchLatestCharacterAuthJson(`${ESI_BASE}/characters/${characterId}/skills`, characterId),
+		fetchLatestCharacterAuthJson(`${ESI_BASE}/characters/${characterId}/attributes`, characterId),
+		fetchLatestCharacterAuthJson(`${ESI_BASE}/characters/${characterId}/implants`, characterId)
+	]);
+	const implantInfos = [];
+	for (const id of implants) {
+		const info = await getTypeInfo(id);
+		if (!_hasDogmaAttributes(info)) throw new Error('Missing implant data.');
+		implantInfos.push(info);
+	}
+	const bonuses = buildAttributeImplantMap(implantInfos);
+	// A current remap totals 99 points. Remove the uniform accelerator bonus,
+	// retaining the current distribution and active implants even with an empty queue.
+	const excess = TRAINING_ATTRIBUTE_NAMES.reduce((sum, name) => sum + Number(attributes[name]) - Number(bonuses[name]?.bonus || 0), 0) - 99;
+	const offset = excess / 5;
+	const baseline = subtractGlobalAttributeOffset(attributes, offset);
+	if (!Number.isInteger(offset) || offset < 0 || TRAINING_ATTRIBUTE_NAMES.some(name => {
+		const base = baseline[name] - Number(bonuses[name]?.bonus || 0);
+		return !Number.isInteger(base) || base < 17 || base > 27;
+	})) throw new Error('Unable to determine attributes without temporary boosters.');
+	return { skills: skills.skills, attributes: baseline };
+}
+
+window.quickestSkillsToV = async function(characterId) {
+	const context = await getCharacterTrainingContext(characterId);
+	return buildQuickestSkillsToV(context.skills, context.attributes);
+};
+
+
+
+function renderCharPlan(characterId) {
+	const section = _el('section', 'sq-plan');
+	section.appendChild(_el('h4', 'sq-section-title', 'Plan'));
+	const workspace = _el('div', 'sq-plan__workspace');
+	const research = _el('div', 'sq-plan__research');
+	const searchWrap = _el('div', 'sq-research__search-wrap');
+	const search = _el('input', 'sq-research__search');
+	search.type = 'search';
+	search.placeholder = 'Search ships and items';
+	search.setAttribute('aria-label', 'Search ships and items');
+	searchWrap.appendChild(search);
+	const results = _el('div', 'sq-research__results');
+	results.hidden = true;
+	searchWrap.appendChild(results);
+	research.appendChild(searchWrap);
+	const selected = _el('div', 'sq-plan__selected');
+	research.appendChild(selected);
+	const planPanel = _el('section', 'sq-plan__queue');
+	const planHeader = _el('div', 'sq-plan__queue-header');
+	planHeader.appendChild(_el('h4', 'sq-section-title', 'Plan Queue'));
+	const planActions = _el('div', 'sq-plan__queue-actions');
+	const clearButton = _el('button', 'sq-btn sq-btn--secondary sq-btn--sm', 'Clear');
+	clearButton.type = 'button';
+	clearButton.disabled = true;
+	planActions.appendChild(clearButton);
+	const exportButton = _el('button', 'sq-btn sq-btn--primary sq-btn--sm', 'Export');
+	exportButton.type = 'button';
+	exportButton.disabled = true;
+	planActions.appendChild(exportButton);
+	planHeader.appendChild(planActions);
+	planPanel.appendChild(planHeader);
+	const planBody = _el('div', 'sq-plan__queue-body');
+	planPanel.appendChild(planBody);
+	workspace.appendChild(research);
+	workspace.appendChild(planPanel);
+	section.appendChild(workspace);
+
+	const LAST_ITEM_KEY = 'skillq:plan:last-item';
+	const LAST_LEVEL_KEY = 'skillq:plan:last-level';
+	const readSetting = (key) => { try { return window.localStorage.getItem(key); } catch (_) { return null; } };
+	const writeSetting = (key, value) => { try { window.localStorage.setItem(key, String(value)); } catch (_) {} };
+	let selection = 0;
+	let items = [];
+	let masteries = {};
+	const requirementAvailability = new Map();
+	let context = null;
+	let currentItem = null;
+	let currentPlan = [];
+	let planGoals = new Map();
+	let planSources = new Map();
+	let highlightedSearchResult = -1;
+	const PLAN_STATE_KEY = `skillq:plan:queue:${characterId}`;
+	const savePlanState = () => {
+		try {
+			window.localStorage.setItem(PLAN_STATE_KEY, JSON.stringify({
+				goals: Array.from(planGoals.entries()),
+				sources: Array.from(planSources.entries()).map(([typeID, values]) => [typeID, Array.from(values)])
+			}));
+		} catch (_) {}
+	};
+	const restorePlanState = () => {
+		try {
+			const saved = JSON.parse(window.localStorage.getItem(PLAN_STATE_KEY) || 'null');
+			for (const [typeID, level] of (saved?.goals || [])) planGoals.set(Number(typeID), Number(level));
+			for (const [typeID, values] of (saved?.sources || [])) {
+				planSources.set(Number(typeID), new Set(values.map((value) => String(value).replace(/\s+—\s+/g, ': '))));
+			}
+		} catch (_) {}
+	};
+	restorePlanState();
+
+	const currentLevel = (character, typeID) => Number(character.skills.find((skill) => Number(skill.skill_id) === Number(typeID))?.trained_skill_level || 0);
+	const addGoals = (roots, itemName, targetLevel) => {
+		let added = 0;
+		for (const root of roots) {
+			const typeID = Number(root.typeID);
+			const level = Number(root.requiredSkillLevel || 0);
+			if (!typeID || !level) continue;
+			if (!planGoals.has(typeID)) added += 1;
+			planGoals.set(typeID, Math.max(Number(planGoals.get(typeID) || 0), level));
+			if (!planSources.has(typeID)) planSources.set(typeID, new Set());
+			planSources.get(typeID).add(`${itemName}${targetLevel ? `: Mastery ${toRomanNumeral(targetLevel)}` : ': Required'}`);
+		}
+		savePlanState();
+		return added;
+	};
+
+	const rebuildPlanQueue = async () => {
+		if (!context) context = getCharacterTrainingContext(characterId);
+		const character = await context;
+		const goals = Array.from(planGoals, ([typeID, requiredSkillLevel]) => ({ typeID, requiredSkillLevel }));
+		if (!goals.length) {
+			currentPlan = [];
+			clearButton.disabled = true;
+			exportButton.disabled = true;
+			planBody.replaceChildren(_el('p', 'sq-muted', 'Add a ship or item to build the plan queue.'));
+			return;
+		}
+		planBody.textContent = 'Optimizing plan queue…';
+		const generated = await buildQuickestSkillsToV(character.skills, character.attributes, goals);
+		const incomplete = generated.filter((row) => Number(row.level || 0) > currentLevel(character, row.typeID));
+		const optimized = await optimizeSkillQueueOrder(incomplete, character.skills);
+		currentPlan = optimized.queue;
+		clearButton.disabled = false;
+		exportButton.disabled = currentPlan.length === 0;
+		planBody.replaceChildren();
+		if (!currentPlan.length) {
+			planBody.appendChild(_el('p', 'sq-muted', 'All planned skills are already complete.'));
+			return;
+		}
+		const table = document.createElement('table');
+		table.className = 'sq-table sq-table--striped';
+		const head = document.createElement('thead');
+		head.innerHTML = '<tr><th>Skill</th></tr>';
+		table.appendChild(head);
+		const tbody = document.createElement('tbody');
+		for (const row of currentPlan) {
+			const tr = document.createElement('tr');
+			tr.appendChild((() => { const td = document.createElement('td'); td.appendChild(_a(`/item/${row.typeID}/`, `${row.typeName} ${toRomanNumeral(row.level)}`)); return td; })());
+			tbody.appendChild(tr);
+		}
+		table.appendChild(tbody);
+		planBody.appendChild(table);
+	};
+	clearButton.addEventListener('click', async () => {
+		planGoals.clear();
+		planSources.clear();
+		savePlanState();
+		await rebuildPlanQueue();
+	});
+
+	const showItem = async (item, requestedLevel = null) => {
+		const request = ++selection;
+		currentItem = item;
+		writeSetting(LAST_ITEM_KEY, item.id);
+		results.hidden = true;
+		search.value = item.name;
+		try {
+			const info = await getTypeInfo(item.id);
+			const group = await getGroupInfo(info?.group_id);
+			const itemMasteries = masteries[String(item.id)] || null;
+			const hasMasteries = Boolean(itemMasteries && Object.keys(itemMasteries).length);
+			const baseRoots = group?.category_id === 16 ? [{ typeID: item.id, requiredSkillLevel: 1 }] : _extractRequirementRows(info);
+			const options = hasMasteries ? [[0, 'Required'], [1, 'I'], [2, 'II'], [3, 'III'], [4, 'IV'], [5, 'V']] : [[0, 'Required']];
+			let targetLevel = options.some(([value]) => value === Number(requestedLevel)) ? Number(requestedLevel) : (hasMasteries ? 1 : 0);
+			if (!context) context = getCharacterTrainingContext(characterId);
+			const character = await context;
+			if (request !== selection) return;
+			selected.replaceChildren();
+			const title = _el('div', 'sq-plan__selected-title', item.name);
+			selected.appendChild(title);
+			const controls = _el('div', 'sq-plan__controls');
+			const buttons = _el('div', 'sq-research__targets');
+			const addButton = _el('button', 'sq-btn sq-btn--primary sq-btn--sm', 'Plan →');
+			addButton.type = 'button';
+			const refreshButtons = () => Array.from(buttons.children).forEach((button, index) => {
+				button.classList.toggle('sq-btn--primary', options[index][0] === targetLevel);
+				button.classList.toggle('sq-btn--info', options[index][0] !== targetLevel);
+			});
+			const requirementBody = _el('div', 'sq-plan__requirements');
+			const showRequirements = async () => {
+				requirementBody.textContent = 'Loading skills…';
+				const roots = hasMasteries && targetLevel > 0 ? (itemMasteries[String(targetLevel)] || []) : baseRoots;
+				if (!roots.length) {
+					requirementBody.textContent = 'No skill requirements found.';
+					return;
+				}
+				const required = new Map();
+				const pending = roots.map((row) => ({ ...row, requiredSkillLevel: Math.max(Number(row.requiredSkillLevel || 0), targetLevel) }));
+				while (pending.length) {
+					const row = pending.pop();
+					if (!row?.typeID || (required.get(row.typeID)?.requiredSkillLevel || 0) >= row.requiredSkillLevel) continue;
+					const skillInfo = await getTypeInfo(row.typeID);
+					required.set(row.typeID, { ...row, typeName: skillInfo?.name || `Skill ${row.typeID}` });
+					pending.push(..._extractRequirementRows(skillInfo));
+				}
+				const table = document.createElement('table');
+				table.className = 'sq-table sq-table--striped';
+				const head = document.createElement('thead');
+				head.innerHTML = '<tr><th>Skill</th><th>Trained</th><th>Required</th></tr>';
+				table.appendChild(head);
+				const tbody = document.createElement('tbody');
+				for (const row of [...required.values()].sort((left, right) => left.typeName.localeCompare(right.typeName))) {
+					const tr = document.createElement('tr');
+					const name = document.createElement('td');
+					name.appendChild(_a(`/item/${row.typeID}/`, row.typeName));
+					tr.appendChild(name);
+					tr.appendChild(_el('td', null, toRomanNumeral(currentLevel(character, row.typeID)) || '0'));
+					tr.appendChild(_el('td', null, toRomanNumeral(row.requiredSkillLevel)));
+					tbody.appendChild(tr);
+				}
+				table.appendChild(tbody);
+				requirementBody.replaceChildren(table);
+			};
+			for (const [value, label] of options) {
+				const button = _el('button', 'sq-btn sq-btn--info sq-btn--sm', label);
+				button.type = 'button';
+				button.addEventListener('click', () => { targetLevel = value; writeSetting(LAST_LEVEL_KEY, value); refreshButtons(); showRequirements(); });
+				buttons.appendChild(button);
+			}
+			refreshButtons();
+			controls.appendChild(buttons);
+			controls.appendChild(addButton);
+			selected.appendChild(controls);
+			const note = _el('p', 'sq-muted', hasMasteries ? 'Choose a mastery level, then add it to the Plan Queue.' : 'This item has prerequisites but no mastery levels.');
+			selected.appendChild(note);
+			selected.appendChild(requirementBody);
+			addButton.addEventListener('click', async () => {
+				const roots = hasMasteries && targetLevel > 0 ? (itemMasteries[String(targetLevel)] || []) : baseRoots;
+				const incompleteRoots = roots.filter((row) => Number(row.requiredSkillLevel || 0) > currentLevel(character, row.typeID));
+				if (!incompleteRoots.length) {
+					showToast('No skills to add', addButton);
+					await rebuildPlanQueue();
+					return;
+				}
+				const added = addGoals(incompleteRoots, item.name, targetLevel);
+				showToast(added ? `${added} skill${added === 1 ? '' : 's'} added` : 'No skills to add', addButton);
+				writeSetting(LAST_LEVEL_KEY, targetLevel);
+				await rebuildPlanQueue();
+			});
+			await showRequirements();
+		} catch (error) { if (request === selection) selected.textContent = error.message; }
+	};
+
+	let searchRequest = 0;
+	const renderResults = async () => {
+		const request = ++searchRequest;
+		results.replaceChildren();
+		results.hidden = true;
+		highlightedSearchResult = -1;
+		if (!search.value.trim()) return;
+		results.appendChild(_el('p', 'sq-muted', 'Searching…'));
+		results.hidden = false;
+		await ensureLocalSdeDataLoaded();
+		if (request !== searchRequest) return;
+		const words = search.value.trim().toLowerCase().split(/\s+/);
+		const candidates = items.filter((item) => words.every((word) => item.name.toLowerCase().includes(word)));
+		const matches = [];
+		for (const item of candidates) {
+			if (matches.length >= 50) break;
+			let hasRequirements = requirementAvailability.get(Number(item.id));
+			if (hasRequirements === undefined) {
+				const itemMasteries = masteries[String(item.id)];
+				const masteryRequirements = itemMasteries && Object.values(itemMasteries).some((rows) => Array.isArray(rows) && rows.length);
+				const info = masteryRequirements ? null : (localTypeInfoCache.get(String(item.id)) || await getTypeInfo(item.id));
+				hasRequirements = Boolean(masteryRequirements || _extractRequirementRows(info).length);
+				requirementAvailability.set(Number(item.id), hasRequirements);
+			}
+			if (hasRequirements) matches.push(item);
+			if (request !== searchRequest) return;
+		}
+		if (request !== searchRequest) return;
+		results.replaceChildren();
+		for (const item of matches.slice(0, 50)) {
+			const choose = _el('button', 'sq-research__result', item.name);
+			choose.type = 'button';
+			choose.addEventListener('mouseenter', () => {
+				highlightedSearchResult = Array.from(results.children).indexOf(choose);
+				updateSearchHighlight();
+			});
+			choose.addEventListener('click', () => showItem(item));
+			results.appendChild(choose);
+		}
+		if (!matches.length) results.appendChild(_el('p', 'sq-muted', 'No matching items with skill requirements.'));
+		results.hidden = false;
+	};
+	const updateSearchHighlight = () => {
+		const choices = Array.from(results.querySelectorAll('.sq-research__result'));
+		choices.forEach((choice, index) => choice.classList.toggle('sq-research__result--active', index === highlightedSearchResult));
+		if (highlightedSearchResult >= 0 && choices[highlightedSearchResult]) choices[highlightedSearchResult].scrollIntoView({ block: 'nearest' });
+	};
+	search.addEventListener('input', renderResults);
+	search.addEventListener('keydown', (event) => {
+		const choices = Array.from(results.querySelectorAll('.sq-research__result'));
+		if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+			if (!choices.length) return;
+			event.preventDefault();
+			const direction = event.key === 'ArrowDown' ? 1 : -1;
+			highlightedSearchResult = (highlightedSearchResult + direction + choices.length) % choices.length;
+			updateSearchHighlight();
+		} else if (event.key === 'Enter' && highlightedSearchResult >= 0 && choices[highlightedSearchResult]) {
+			event.preventDefault();
+			choices[highlightedSearchResult].click();
+		} else if (event.key === 'Escape') {
+			results.hidden = true;
+			highlightedSearchResult = -1;
+		}
+	});
+	exportButton.addEventListener('click', async () => {
+		const optimized = await optimizeSkillQueueOrder(currentPlan, (await context).skills);
+		_showSkillQueueOptimizationModal(optimized.queue, optimized.warnings, 'Plan');
+	});
+	Promise.all([fetchLocalJson('/data/items.json'), fetchLocalJson('/data/masteries.json')]).then(async ([itemData, masteryData]) => {
+		items = Array.isArray(itemData) ? itemData : [];
+		masteries = masteryData && typeof masteryData === 'object' ? masteryData : {};
+		search.disabled = false;
+		await rebuildPlanQueue();
+		const lastItem = items.find((item) => String(item.id) === readSetting(LAST_ITEM_KEY));
+		if (lastItem) await showItem(lastItem, readSetting(LAST_LEVEL_KEY));
+	}).catch((error) => { selected.textContent = error.message; });
+	search.disabled = true;
+	planBody.appendChild(_el('p', 'sq-muted', 'Add a ship or item to build the plan queue.'));
+	return section;
 }
 
 async function getSkillEnables(typeId) {
