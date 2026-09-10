@@ -546,7 +546,7 @@ function renderCharInfo({ character, corporation = null, alliance = null, traini
  * renderCharMenu({ charName, activeTab })
  *
  * charName:  plain character name (will be URI-encoded)
- * activeTab: 'overview' | 'wallet' | 'train' | 'clones' | 'notes'
+	 * activeTab: 'overview' | 'wallet' | 'train' | 'research' | 'clones' | 'notes'
  */
 function renderCharMenu({ charName, activeTab = 'overview' } = {}) {
 	const encoded = encodeCharacterNameForPath(charName);
@@ -554,6 +554,7 @@ function renderCharMenu({ charName, activeTab = 'overview' } = {}) {
 		{ id: 'overview', label: 'Overview', href: `/char/${encoded}/` },
 		{ id: 'wallet',   label: 'Wallet',   href: `/char/${encoded}/wallet/` },
 		{ id: 'train',    label: 'Train',    href: `/char/${encoded}/train/` },
+		{ id: 'plan',     label: 'Plan',     href: `/char/${encoded}/plan/` },
 		{ id: 'clones',   label: 'Clones',   href: `/char/${encoded}/clones/` },
 		{ id: 'notes',    label: 'Notes',    href: `/char/${encoded}/notes/` },
 	];

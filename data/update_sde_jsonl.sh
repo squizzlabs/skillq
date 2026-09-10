@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_LATEST_FILE="${SCRIPT_DIR}/latest.json"
 GROUPS_OUTPUT_FILE="${SCRIPT_DIR}/groups.json"
 TYPES_OUTPUT_FILE="${SCRIPT_DIR}/types.json"
+MASTERIES_OUTPUT_FILE="${SCRIPT_DIR}/masteries.json"
 REMOTE_LATEST_URL="https://developers.eveonline.com/static-data/tranquility/latest.jsonl"
 SDE_ZIP_URL="https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip"
 # SDE skill category is 16 (Skill) in current data.
@@ -51,7 +52,7 @@ if [[ -f "${TYPES_OUTPUT_FILE}" ]]; then
   types_existing_count="$(jq 'length' "${TYPES_OUTPUT_FILE}" 2>/dev/null || echo 0)"
 fi
 
-if [[ "${is_current}" -eq 1 && "${FORCE_REBUILD}" != "1" && "${groups_existing_count}" -gt 0 && "${types_existing_count}" -gt 0 ]]; then
+if [[ "${is_current}" -eq 1 && "${FORCE_REBUILD}" != "1" && "${groups_existing_count}" -gt 0 && "${types_existing_count}" -gt 0 && -s "${SCRIPT_DIR}/items.json" && -s "${MASTERIES_OUTPUT_FILE}" ]]; then
   echo "SDE is already current and output files are populated; no update required."
   exit 0
 fi
@@ -72,6 +73,7 @@ find_jsonl_file() {
 
 groups_jsonl="$(find_jsonl_file 'groups.jsonl')"
 types_jsonl="$(find_jsonl_file 'types.jsonl')"
+certificates_jsonl="$(find_jsonl_file 'certificates.jsonl')"
 
 if [[ -z "${groups_jsonl}" ]]; then
   echo "Could not find groups.jsonl in downloaded SDE archive" >&2
@@ -80,6 +82,11 @@ fi
 
 if [[ -z "${types_jsonl}" ]]; then
   echo "Could not find types.jsonl in downloaded SDE archive" >&2
+  exit 1
+fi
+
+if [[ -z "${certificates_jsonl}" ]]; then
+  echo "Could not find certificates.jsonl in downloaded SDE archive" >&2
   exit 1
 fi
 
@@ -138,3 +145,29 @@ fi
 
 mv "${remote_latest_file}" "${LOCAL_LATEST_FILE}"
 echo "SDE import complete. Updated ${LOCAL_LATEST_FILE}."
+
+# Published items for character discovery; detailed dogma remains in the type cache.
+jq -cs 'map(select(.published == true) | {id: (._key | tonumber), name: (.name.en // .name)}) | sort_by(.name)' "${types_jsonl}" > "${SCRIPT_DIR}/items.json"
+
+# Ship mastery skills. Each certificate maps its recommended ships to the
+# five in-game mastery levels; merge certificates by taking the highest level
+# requested for each skill.
+jq -cs '
+  reduce .[] as $cert ({};
+    reduce ($cert.recommendedFor // [])[] as $ship (.;
+      reduce ($cert.skillTypes // [])[] as $skill (.;
+        reduce ([
+          {level: 1, value: $skill.basic},
+          {level: 2, value: $skill.standard},
+          {level: 3, value: $skill.improved},
+          {level: 4, value: $skill.advanced},
+          {level: 5, value: $skill.elite}
+        ] | map(select(.value > 0)))[] as $req (.;
+          .[($ship | tostring)][($req.level | tostring)][($skill._key | tostring)] =
+            ([.[$ship | tostring][$req.level | tostring][($skill._key | tostring)] // 0, $req.value] | max)
+        )
+      )
+    )
+  )
+  | with_entries(.value |= with_entries(.value |= (to_entries | map({typeID: (.key | tonumber), requiredSkillLevel: .value}))))
+' "${certificates_jsonl}" > "${MASTERIES_OUTPUT_FILE}"
