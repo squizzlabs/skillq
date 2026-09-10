@@ -515,6 +515,57 @@ vertical-align: top;
 
 /* ── Skill controls ── */
 .sq-skill-controls { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.sq-queue__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.sq-queue__header .sq-section-title { margin-bottom: 0.5rem; }
+.sq-queue__controls { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
+.sq-queue__warning { margin: 0.35rem 0; color: var(--warn, #f59e0b); }
+
+/* ── Queue import modal ── */
+.sq-modal-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 1000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1rem;
+	background: rgba(0, 0, 0, 0.72);
+}
+.sq-modal {
+	width: min(40rem, 100%);
+	max-height: min(90vh, 46rem);
+	overflow: auto;
+	padding: 1.25rem;
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: 0.45rem;
+	box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.45);
+}
+.sq-modal__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.sq-modal__title { margin: 0; }
+.sq-modal__close {
+	padding: 0.1rem 0.45rem;
+	border: 0;
+	background: transparent;
+	color: var(--fg);
+	font-size: 1.7rem;
+	line-height: 1;
+	cursor: pointer;
+}
+.sq-modal__textarea {
+	width: 100%;
+	min-height: 12rem;
+	box-sizing: border-box;
+	padding: 0.65rem;
+	resize: vertical;
+	background: var(--bg);
+	color: var(--fg);
+	border: 1px solid var(--border);
+	font: 0.85rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.sq-modal__actions { display: flex; justify-content: flex-end; margin-top: 0.65rem; }
+.sq-modal__instructions { margin-top: 1rem; padding-top: 0.85rem; border-top: 1px solid var(--border); }
+.sq-modal__instructions ol { margin: 0.45rem 0 0.7rem 1.25rem; padding: 0; }
 
 /* ── Countdown ── */
 .sq-countdown { font-size: 0.85em; color: var(--muted); }

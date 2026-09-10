@@ -9,7 +9,7 @@
 	<script>
 		(function () {
 			const url = new URL(window.location.href);
-			const target = new URL('/index.html?v=--hash--', url.origin);
+			const target = new URL('/index.html?v=--hash--&rev=queue-optimizer-2', url.origin);
 			target.searchParams.set('route', url.pathname);
 			target.searchParams.set('routeQuery', url.search);
 			window.location = target.toString() + url.hash;

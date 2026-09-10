@@ -2769,6 +2769,124 @@ async function getItemRequirements(typeId, visited = new Set(), depth = 0) {
 	return rows;
 }
 
+/**
+ * Produce a fastest-first preview of the current queue without changing EVE.
+ * A prerequisite that is also in the queue is always scheduled before the
+ * queued skill that needs it. Skills already trained to the required level do
+ * not create a dependency.
+ */
+async function optimizeSkillQueueOrder(queue = [], skills = []) {
+	const rows = Array.isArray(queue) ? queue.map((entry, index) => ({ entry, index })) : [];
+	if (rows.length < 2) return { queue: rows.map((row) => row.entry), warnings: [] };
+
+	const currentLevels = new Map((Array.isArray(skills) ? skills : []).map((skill) => [
+		Number(skill?.typeID || 0), Number(skill?.level || skill?.trained_skill_level || 0)
+	]));
+	const skillByTypeId = new Map((Array.isArray(skills) ? skills : []).map((skill) => [Number(skill?.typeID || 0), skill]));
+	const infoByTypeId = new Map();
+	const requirementByTypeId = new Map();
+	await Promise.all(rows.map(async ({ entry }) => {
+		const typeId = Number(entry?.typeID || 0);
+		if (!typeId || infoByTypeId.has(typeId)) return;
+		infoByTypeId.set(typeId, await getTypeInfo(typeId));
+		try {
+			requirementByTypeId.set(typeId, await getItemRequirements(typeId));
+		} catch (_) {
+			requirementByTypeId.set(typeId, []);
+		}
+	}));
+
+	const targetLevel = (entry) => Number(entry?.level || entry?.targetLevel || entry?.finished_level || entry?.finishedLevel || entry?.target_level || 0);
+	const remainingSp = (entry) => {
+		const explicit = Number(entry?.spNeeded || 0);
+		if (explicit > 0) return explicit;
+		const skill = skillByTypeId.get(Number(entry?.typeID || 0));
+		const target = targetLevel(entry);
+		const rank = Number(skill?.skillRank || 0);
+		if (skill && target > 0 && rank > 0) {
+			return Math.max(0, getSkillPointsForLevel(target, rank) - Number(skill.skillPoints || 0));
+		}
+		return 0;
+	};
+	const durationSeconds = (entry) => {
+		const spNeeded = remainingSp(entry);
+		// expectedSpHour is based on the character's current effective attributes (including
+		// implants) and intentionally excludes temporary booster speed.
+		const spHour = Number(entry?.expectedSpHour || 0);
+		if (spNeeded > 0 && spHour > 0) return spNeeded / spHour * 3600;
+		return Number.MAX_SAFE_INTEGER;
+	};
+	const active = rows.filter(({ entry }) => {
+		const startMs = _queueDateMs(entry, 'startDate');
+		const endMs = _queueDateMs(entry, 'endDate');
+		return startMs > 0 && endMs > Date.now() && startMs <= Date.now();
+	});
+	const activeSet = new Set(active.map(({ index }) => index));
+	const pending = rows.filter(({ index }) => !activeSet.has(index));
+	const byType = new Map();
+	for (const row of rows) {
+		const typeId = Number(row.entry?.typeID || 0);
+		if (!byType.has(typeId)) byType.set(typeId, []);
+		byType.get(typeId).push(row);
+	}
+
+	const dependencies = new Map(pending.map(({ index }) => [index, new Set()]));
+	const warnings = [];
+	for (const dependent of pending) {
+		const dependentId = Number(dependent.entry?.typeID || 0);
+		const requirements = requirementByTypeId.get(dependentId) || [];
+		for (const requirement of requirements) {
+			const requiredId = Number(requirement?.typeID || 0);
+			const requiredLevel = Number(requirement?.requiredSkillLevel || 0);
+			if (!requiredId || !requiredLevel || requiredId === dependentId) continue;
+			if (Number(currentLevels.get(requiredId) || 0) >= requiredLevel) continue;
+			const candidates = (byType.get(requiredId) || [])
+				.filter((row) => targetLevel(row.entry) >= requiredLevel)
+				.sort((left, right) => targetLevel(left.entry) - targetLevel(right.entry) || left.index - right.index);
+			if (activeSet.has(dependent.index)) {
+				if (candidates.some((row) => !activeSet.has(row.index))) {
+					const requiredInfo = await getTypeInfo(requiredId);
+					warnings.push(`Current training ${dependent.entry?.typeName || `Skill ${dependentId}`} depends on ${requiredInfo?.name || `Skill ${requiredId}`} ${toRomanNumeral(requiredLevel)} later in the queue; EVE must be corrected manually.`);
+				}
+				continue;
+			}
+			if (candidates.some((row) => activeSet.has(row.index))) continue;
+			if (candidates.length === 0) {
+				const requiredInfo = await getTypeInfo(requiredId);
+				warnings.push(`${dependent.entry?.typeName || `Skill ${dependentId}`} needs ${requiredInfo?.name || `Skill ${requiredId}`} ${toRomanNumeral(requiredLevel)}, which is not in the current queue.`);
+				continue;
+			}
+			const prerequisite = candidates[0];
+			dependencies.get(dependent.index).add(prerequisite.index);
+		}
+	}
+
+	const orderedPending = [];
+	if (pending.some(({ entry }) => durationSeconds(entry) === Number.MAX_SAFE_INTEGER)) {
+		warnings.push('Some queue entries have no measured SP/hour rate, so they were placed after rate-known skills.');
+	}
+	const remaining = new Set(pending.map(({ index }) => index));
+	while (remaining.size > 0) {
+		const ready = pending.filter(({ index }) => remaining.has(index) && Array.from(dependencies.get(index)).every((dependency) => !remaining.has(dependency)));
+		if (ready.length === 0) {
+			warnings.push('A prerequisite cycle or incomplete requirement data was detected; the remaining skills kept their current order.');
+			orderedPending.push(...pending.filter(({ index }) => remaining.has(index)));
+			break;
+		}
+		ready.sort((left, right) => durationSeconds(left.entry) - durationSeconds(right.entry) || left.index - right.index);
+		const next = ready[0];
+		orderedPending.push(next);
+		remaining.delete(next.index);
+	}
+
+	return {
+		queue: active.concat(orderedPending).map((row) => row.entry),
+		warnings: Array.from(new Set(warnings))
+	};
+}
+
+window.optimizeSkillQueueOrder = optimizeSkillQueueOrder;
+
 async function getSkillEnables(typeId) {
 	const index = await getSkillEnablesIndex();
 	return Array.isArray(index?.[String(typeId)]) ? index[String(typeId)] : [];
