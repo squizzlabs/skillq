@@ -22,7 +22,7 @@ const LAST_BACKGROUND_REFRESH_KEY = '__meta:last-background-refresh';
 const CHARACTER_DATA_UPDATED_EVENT = 'skillq:character-data-updated';
 const CHARACTER_DATA_SYNC_CHANNEL_NAME = 'skillq:character-data-sync';
 const CHARACTER_DATA_SYNC_TAB_ID = `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const TRAIN_CACHE_KEY_PREFIX = 'train-v2';
+const TRAIN_CACHE_KEY_PREFIX = 'train-v4';
 const CHARACTER_NOTE_KEY_PREFIX = 'notes';
 const CHARACTER_NOTE_MAX_LENGTH = 10000;
 const CHARACTER_NOTE_AUTOSAVE_DELAY_MS = 2000;
@@ -56,8 +56,8 @@ const SHARE_SECTION_KEYS = {
 	jumpClones: 'jumpClones',
 	notes: 'notes'
 };
-let githubhash = "6c56856";
-const staticCacheHash = window.location.hostname === 'localhost' ? Date.now() : '6c56856';
+let githubhash = "29b555b";
+const staticCacheHash = window.location.hostname === 'localhost' ? Date.now() : '29b555b';
 let layoutMode = 'restricted';
 let themeMode = 'dark';
 
@@ -4665,6 +4665,25 @@ function buildAttributeImplantMap(implantInfos = []) {
 async function buildTrainingSuggestions(skills, attributes, implantByAttribute = null, queueRows = []) {
 	const candidates = skills.filter((skill) => Number(skill.trained_skill_level ?? 0) < 5).slice(0, 25);
 	const typeInfos = new Map(await Promise.all(candidates.map(async (row) => [row.skill_id, await getTypeInfo(row.skill_id)])));
+
+	const queuedSkillIds = Array.from(new Set((Array.isArray(queueRows) ? queueRows : [])
+		.map((row) => Number(row?.skill_id || 0))
+		.filter((id) => id > 0)));
+	const missingQueuedTypeIds = queuedSkillIds.filter((id) => !typeInfos.has(id));
+	if (missingQueuedTypeIds.length > 0) {
+		const extraTypeInfos = await Promise.all(missingQueuedTypeIds.map(async (id) => [id, await getTypeInfo(id)]));
+		for (const [id, info] of extraTypeInfos) {
+			typeInfos.set(id, info);
+		}
+	}
+
+	// Suggestions should use the character's current implant-enhanced attributes,
+	// but not temporary accelerators. ESI exposes effective attributes (including
+	// implants), so remove only the global bonus inferred from the queue.
+	const suggestionAttributes = subtractGlobalAttributeOffset(
+		attributes,
+		inferGlobalAttributeOffset(queueRows, typeInfos, attributes)
+	);
 	const suggestions = [];
 
 	for (const row of candidates) {
@@ -4679,7 +4698,7 @@ async function buildTrainingSuggestions(skills, attributes, implantByAttribute =
 		const targetSp = getSkillPointsForLevel(5, rank);
 		const remainingSp = Math.max(0, targetSp - currentSp);
 		if (remainingSp <= 0) continue;
-		const spPerHour = calculateSkillSpPerHour(attributes, primaryAttribute, secondaryAttribute);
+		const spPerHour = calculateSkillSpPerHour(suggestionAttributes, primaryAttribute, secondaryAttribute);
 		const remainingSeconds = spPerHour > 0 ? Math.ceil((remainingSp / spPerHour) * 3600) : Number.MAX_SAFE_INTEGER;
 		suggestions.push({
 			typeName: typeInfo?.name || `Skill ${row.skill_id}`,
@@ -4693,17 +4712,6 @@ async function buildTrainingSuggestions(skills, attributes, implantByAttribute =
 			queue: 0,
 			remainingSeconds
 		});
-	}
-
-	const queuedSkillIds = Array.from(new Set((Array.isArray(queueRows) ? queueRows : [])
-		.map((row) => Number(row?.skill_id || 0))
-		.filter((id) => id > 0)));
-	const missingQueuedTypeIds = queuedSkillIds.filter((id) => !typeInfos.has(id));
-	if (missingQueuedTypeIds.length > 0) {
-		const extraTypeInfos = await Promise.all(missingQueuedTypeIds.map(async (id) => [id, await getTypeInfo(id)]));
-		for (const [id, info] of extraTypeInfos) {
-			typeInfos.set(id, info);
-		}
 	}
 
 	const skillSpById = new Map((Array.isArray(skills) ? skills : []).map((row) => [
@@ -4742,7 +4750,7 @@ async function buildTrainingSuggestions(skills, attributes, implantByAttribute =
 	}
 
 	const topSuggestions = suggestions.sort((a, b) => a.remainingSeconds - b.remainingSeconds).slice(0, 20);
-	const optimize = optimizeAttributeRemap(optimizationCandidates, attributes, implantByAttribute || {});
+	const optimize = optimizeAttributeRemap(optimizationCandidates, suggestionAttributes, implantByAttribute || {});
 	return { suggestions: topSuggestions, optimize };
 }
 
