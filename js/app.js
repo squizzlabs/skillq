@@ -22,7 +22,7 @@ const LAST_BACKGROUND_REFRESH_KEY = '__meta:last-background-refresh';
 const CHARACTER_DATA_UPDATED_EVENT = 'skillq:character-data-updated';
 const CHARACTER_DATA_SYNC_CHANNEL_NAME = 'skillq:character-data-sync';
 const CHARACTER_DATA_SYNC_TAB_ID = `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const TRAIN_CACHE_KEY_PREFIX = 'train-v4';
+const TRAIN_CACHE_KEY_PREFIX = 'train-v5';
 const CHARACTER_NOTE_KEY_PREFIX = 'notes';
 const CHARACTER_NOTE_MAX_LENGTH = 10000;
 const CHARACTER_NOTE_AUTOSAVE_DELAY_MS = 2000;
@@ -69,6 +69,86 @@ function withStaticCacheHash(path) {
 
 function getTrainCacheKey(characterId) {
 	return `${TRAIN_CACHE_KEY_PREFIX}:${characterId}`;
+}
+
+function getSkillInjectorYield(totalSkillPoints) {
+	const total = Math.max(0, Number(totalSkillPoints || 0));
+	if (total < 5_000_000) return 500_000;
+	if (total < 50_000_000) return 400_000;
+	if (total < 80_000_000) return 300_000;
+	return 150_000;
+}
+
+function estimateSkillInjectors(requiredSkillPoints, totalSkillPoints) {
+	const requiredValue = Number(requiredSkillPoints || 0);
+	const totalValue = Number(totalSkillPoints || 0);
+	const required = Number.isFinite(requiredValue) ? Math.max(0, Math.ceil(requiredValue)) : 0;
+	let projectedTotal = Number.isFinite(totalValue) ? Math.max(0, Math.floor(totalValue)) : 0;
+	let injectedSkillPoints = 0;
+	let injectorCount = 0;
+
+	while (injectedSkillPoints < required) {
+		const yieldAmount = getSkillInjectorYield(projectedTotal);
+		injectedSkillPoints += yieldAmount;
+		projectedTotal += yieldAmount;
+		injectorCount += 1;
+	}
+
+	return { injectorCount, injectedSkillPoints };
+}
+
+function buildQueueInjectorEstimate(skillsResponse, queueRows, now = Date.now()) {
+	const skills = Array.isArray(skillsResponse?.skills) ? skillsResponse.skills : [];
+	const queue = Array.isArray(queueRows) ? queueRows : [];
+	const skillSpById = new Map(skills.map((row) => [
+		Number(row?.skill_id || 0),
+		Number(row?.skillpoints_in_skill || 0)
+	]));
+	const inferredCurrentSpById = new Map(skillSpById);
+	let queueSkillPoints = 0;
+
+	for (const row of queue) {
+		const startSp = Number(row?.training_start_sp ?? row?.level_start_sp ?? 0);
+		const endSp = Number(row?.level_end_sp ?? 0);
+		if (!(endSp > startSp)) continue;
+
+		const startMs = row?.start_date ? (Date.parse(row.start_date) || 0) : 0;
+		const endMs = row?.finish_date ? (Date.parse(row.finish_date) || 0) : 0;
+		const skillId = Number(row?.skill_id || 0);
+		if (endMs > 0 && endMs <= now) {
+			inferredCurrentSpById.set(skillId, Math.max(Number(inferredCurrentSpById.get(skillId) || 0), endSp));
+			continue;
+		}
+
+		let currentSp = startSp;
+		if (startMs > 0 && endMs > now && startMs <= now) {
+			const reportedSp = Number(inferredCurrentSpById.get(skillId) || startSp);
+			const elapsedFraction = Math.min(1, Math.max(0, (now - startMs) / (endMs - startMs)));
+			const timeEstimatedSp = startSp + ((endSp - startSp) * elapsedFraction);
+			currentSp = Math.min(endSp, Math.max(startSp, reportedSp, timeEstimatedSp));
+			inferredCurrentSpById.set(skillId, currentSp);
+		}
+
+		queueSkillPoints += Math.max(0, endSp - currentSp);
+	}
+
+	queueSkillPoints = Math.ceil(queueSkillPoints);
+	const allocatedSkillPoints = Math.max(0, Number(skillsResponse?.total_sp || 0));
+	const unallocatedSkillPoints = Math.max(0, Number(skillsResponse?.unallocated_sp || 0));
+	const requiredSkillPoints = Math.max(0, queueSkillPoints - unallocatedSkillPoints);
+	const inferredUnreportedSkillPoints = Array.from(inferredCurrentSpById).reduce((total, [skillId, inferredSp]) => (
+		total + Math.max(0, Number(inferredSp || 0) - Number(skillSpById.get(skillId) || 0))
+	), 0);
+	const overallSkillPoints = allocatedSkillPoints + unallocatedSkillPoints + inferredUnreportedSkillPoints;
+	const injection = estimateSkillInjectors(requiredSkillPoints, overallSkillPoints);
+
+	return {
+		queueSkillPoints,
+		unallocatedSkillPoints,
+		requiredSkillPoints,
+		injectorCount: injection.injectorCount,
+		injectedSkillPoints: injection.injectedSkillPoints
+	};
 }
 
 function getCharacterNoteKey(characterId) {
@@ -2127,9 +2207,11 @@ function buildCharacterTabContent(data, activeTab) {
 
 	if (activeTab === 'train') {
 		content.appendChild(renderCharTrain({
-			characterId: data.character?.character_id,			implants: data.implants || [],
+			characterId: data.character?.character_id,
+			implants: data.implants || [],
 			suggestions: data.suggestions || [],
-			optimize: data.optimize || null
+			optimize: data.optimize || null,
+			injectorEstimate: data.injectorEstimate || null
 		}));
 		if (data.lastUpdatedAt) {
 			const updated = document.createElement('p');
@@ -4158,13 +4240,14 @@ async function loadCharacterPageDataFromCache(characterId, tab) {
 			const overviewCached = await cacheGetCharacterData(`overview:${characterId}`);
 			applyOverviewTrainingToCommonData(data, overviewCached?.queue || []);
 		}
-		const trainData = (await cacheGetCharacterData(getTrainCacheKey(characterId))) || { clones: [], implants: [], suggestions: [], optimize: null, updatedAt: 0 };
+		const trainData = (await cacheGetCharacterData(getTrainCacheKey(characterId))) || { clones: [], implants: [], suggestions: [], optimize: null, injectorEstimate: null, updatedAt: 0 };
 		if (tab === 'clones') {
 			data.clones = trainData.clones || [];
 		} else {
 			data.implants = trainData.implants;
 			data.suggestions = trainData.suggestions;
 			data.optimize = trainData.optimize || null;
+			data.injectorEstimate = trainData.injectorEstimate || null;
 		}
 		latestUpdatedAt = Math.max(latestUpdatedAt, Number(trainData.updatedAt || 0));
 		data.lastUpdatedAt = latestUpdatedAt || null;
@@ -5092,8 +5175,9 @@ async function fetchTrainingSuggestions(characterId) {
 			implantByAttribute,
 			Array.isArray(queueResponse) ? queueResponse : []
 		);
+		const injectorEstimate = buildQueueInjectorEstimate(skillsResponse, queueResponse);
 		const clones = await buildCloneRows(clonesResponse, activeImplantTypeIds, implantInfoByTypeId);
-		return { clones, implants: attributeRows, suggestions, optimize };
+		return { clones, implants: attributeRows, suggestions, optimize, injectorEstimate };
 	} catch (err) {
 		if (await handleCharacterRefreshTokenError(err, characterId)) {
 			throw err;

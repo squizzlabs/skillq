@@ -1430,6 +1430,9 @@ text-align: left;
 .sq-implants { margin-bottom: 1.5rem; }
 .sq-optimize { margin-bottom: 1.5rem; }
 .sq-optimize-summary { margin-top: 0.45rem; }
+.sq-injectors { margin-bottom: 1.5rem; }
+.sq-injectors__count { margin: 0.15rem 0 0.45rem; font-size: 1.15rem; }
+.sq-injectors__summary { margin: 0.35rem 0 0; }
 .sq-train-top-panels {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
