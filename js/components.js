@@ -836,14 +836,16 @@ function renderCharClones({ clones = [] } = {}) {
 
 /* ─── Character Train (attributes + suggestions) ─────────────────────────────
  *
- * renderCharTrain({ implants, suggestions, optimize })
+ * renderCharTrain({ implants, suggestions, optimize, injectorEstimate })
  *
  * implants: [{ attributeName, baseValue, bonus, implantName }]
  * suggestions: [{ typeName, typeID, level, time, primaryAttribute,
  *                 secondaryAttribute, skillPoints, training, queue }]
  * optimize: { rows, sampleSize, currentSeconds, optimizedSeconds, savedSeconds, savedPercent }
+ * injectorEstimate: { queueSkillPoints, unallocatedSkillPoints, requiredSkillPoints,
+ *                     injectorCount, injectedSkillPoints }
  */
-function renderCharTrain({ characterId, implants = [], suggestions = [], optimize = null } = {}) {
+function renderCharTrain({ characterId, implants = [], suggestions = [], optimize = null, injectorEstimate = null } = {}) {
 	const el = _el('div', 'sq-train');
 
 	const topPanels = _el('div', 'sq-train-top-panels');
@@ -936,6 +938,32 @@ function renderCharTrain({ characterId, implants = [], suggestions = [], optimiz
 	if (topPanels.childElementCount > 0) {
 		el.appendChild(topPanels);
 	}
+
+	/* ── Skill Injectors ── */
+	const injectorSection = _el('section', 'sq-injectors');
+	injectorSection.appendChild(_el('h4', 'sq-section-title', 'Skill Injector Estimation'));
+	if (injectorEstimate && Number(injectorEstimate.queueSkillPoints || 0) > 0) {
+		const injectorCount = Math.max(0, Number(injectorEstimate.injectorCount || 0));
+		const count = _el('p', 'sq-injectors__count');
+		count.appendChild(_el('strong', null, numberFormat(injectorCount, 0)));
+		count.appendChild(document.createTextNode(` Skill Injector${injectorCount === 1 ? '' : 's'}`));
+		injectorSection.appendChild(count);
+
+		const queueSp = Number(injectorEstimate.queueSkillPoints || 0);
+		const unallocatedSp = Number(injectorEstimate.unallocatedSkillPoints || 0);
+		const detail = unallocatedSp > 0
+			? `${numberFormat(queueSp, 0)} SP remain in the queue; ${numberFormat(Math.min(queueSp, unallocatedSp), 0)} existing unallocated SP applied first.`
+			: `${numberFormat(queueSp, 0)} SP remain in the queue.`;
+		injectorSection.appendChild(_el('p', 'sq-muted sq-injectors__summary', detail));
+		injectorSection.appendChild(_el(
+			'p',
+			'sq-muted sq-injectors__summary',
+			'Estimate uses the current 500k/400k/300k/150k diminishing-return tiers. Training progress and queue changes may alter the result.'
+		));
+	} else {
+		injectorSection.appendChild(_el('p', 'sq-muted sq-injectors__summary', 'No remaining queued skill points to inject.'));
+	}
+	el.appendChild(injectorSection);
 
 	/* ── Skill Suggestions ── */
 	const section = _el('section', 'sq-skill-suggestions');
