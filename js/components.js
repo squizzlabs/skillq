@@ -939,14 +939,14 @@ function renderCharTrain({ characterId, implants = [], suggestions = [], optimiz
 		el.appendChild(topPanels);
 	}
 
-	/* ── Skill Injectors ── */
+	/* ── Large Skill Injectors ── */
 	const injectorSection = _el('section', 'sq-injectors');
-	injectorSection.appendChild(_el('h4', 'sq-section-title', 'Skill Injector Estimation'));
+	injectorSection.appendChild(_el('h4', 'sq-section-title', 'Large Skill Injector Estimation'));
 	if (injectorEstimate && Number(injectorEstimate.queueSkillPoints || 0) > 0) {
 		const injectorCount = Math.max(0, Number(injectorEstimate.injectorCount || 0));
 		const count = _el('p', 'sq-injectors__count');
 		count.appendChild(_el('strong', null, numberFormat(injectorCount, 0)));
-		count.appendChild(document.createTextNode(` Skill Injector${injectorCount === 1 ? '' : 's'}`));
+		count.appendChild(document.createTextNode(` Large Skill Injector${injectorCount === 1 ? '' : 's'}`));
 		injectorSection.appendChild(count);
 
 		const queueSp = Number(injectorEstimate.queueSkillPoints || 0);

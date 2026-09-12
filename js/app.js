@@ -56,8 +56,8 @@ const SHARE_SECTION_KEYS = {
 	jumpClones: 'jumpClones',
 	notes: 'notes'
 };
-let githubhash = "6129896";
-const staticCacheHash = window.location.hostname === 'localhost' ? Date.now() : '6129896';
+let githubhash = "e420bc6";
+const staticCacheHash = window.location.hostname === 'localhost' ? Date.now() : 'e420bc6';
 let layoutMode = 'restricted';
 let themeMode = 'dark';
 
