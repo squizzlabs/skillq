@@ -10,6 +10,8 @@ const groupInfoCache = new Map();
 const universeNameCache = new Map();
 const localTypeInfoCache = new Map();
 const localGroupInfoCache = new Map();
+const localTypeShardPromises = new Map();
+const LOCAL_TYPE_SHARD_COUNT = 16;
 let localSdeDataPromise = null;
 let skillEnablesIndexPromise = null;
 const lookupStore = new DexieStore('skillq-lookups-db', 'skillq-lookups', 5 * 60 * 1000);
@@ -32,7 +34,7 @@ const characterDataSyncChannel = typeof BroadcastChannel !== 'undefined'
 const LAYOUT_MODE_KEY = '__ui:layout-mode';
 const THEME_MODE_KEY = '__ui:theme-mode';
 const MANAGE_SETTINGS_KEY = '__ui:manage-settings';
-const SKILL_ENABLES_INDEX_KEY = '__ui:skill-enables-index';
+const SKILL_ENABLES_INDEX_KEY = '__ui:skill-enables-index-v2';
 const PERSISTENT_LOOKUP_KEYS = new Set([
 	LAYOUT_MODE_KEY,
 	THEME_MODE_KEY,
@@ -3311,8 +3313,7 @@ function renderCharPlan(characterId) {
 			if (hasRequirements === undefined) {
 				const itemMasteries = masteries[String(item.id)];
 				const masteryRequirements = itemMasteries && Object.values(itemMasteries).some((rows) => Array.isArray(rows) && rows.length);
-				const info = masteryRequirements ? null : (localTypeInfoCache.get(String(item.id)) || await getTypeInfo(item.id));
-				hasRequirements = Boolean(masteryRequirements || _extractRequirementRows(info).length);
+				hasRequirements = Boolean(masteryRequirements || item.hasRequirements);
 				requirementAvailability.set(Number(item.id), hasRequirements);
 			}
 			if (hasRequirements) matches.push(item);
@@ -3389,8 +3390,9 @@ async function getSkillEnablesIndex() {
 		}
 
 		await ensureLocalSdeDataLoaded();
-		const skillIds = Array.from(localTypeInfoCache.keys())
-			.map((id) => Number(id))
+		const skillIds = Array.from(localTypeInfoCache.entries())
+			.filter(([, info]) => localGroupInfoCache.get(String(info?.group_id))?.category_id === 16)
+			.map(([id]) => Number(id))
 			.filter((id) => Number.isFinite(id) && id > 0)
 			.sort((a, b) => a - b);
 
@@ -5360,75 +5362,67 @@ async function buildTrainingSuggestions(skills, attributes, implantByAttribute =
 }
 
 async function getTypeInfo(typeId) {
-	if (!typeId) return null;
-	if (typeInfoCache.has(typeId)) return typeInfoCache.get(typeId);
-	let localInfo = null;
-	const cached = await lookupCacheGet(`type-info:${typeId}`);
+	const normalizedTypeId = Number(typeId || 0);
+	if (!Number.isFinite(normalizedTypeId) || normalizedTypeId <= 0) return null;
+	if (typeInfoCache.has(normalizedTypeId)) return typeInfoCache.get(normalizedTypeId);
+
+	// The bundled SDE is versioned with the application and is the authoritative,
+	// offline-capable source. ESI remains available for IDs that are not in it.
 	await ensureLocalSdeDataLoaded();
-	if (cached && (_hasDogmaAttributes(cached) || !localTypeInfoCache.has(String(typeId)))) {
-		typeInfoCache.set(typeId, cached);
+	let localInfo = localTypeInfoCache.get(String(normalizedTypeId));
+	if (!localInfo) {
+		await ensureLocalTypeShardLoaded(normalizedTypeId);
+		localInfo = localTypeInfoCache.get(String(normalizedTypeId));
+	}
+	if (localInfo) {
+		typeInfoCache.set(normalizedTypeId, localInfo);
+		return localInfo;
+	}
+
+	const cacheKey = `type-info:${normalizedTypeId}`;
+	const cached = await lookupCacheGet(cacheKey);
+	if (cached) {
+		typeInfoCache.set(normalizedTypeId, cached);
 		return cached;
 	}
-	if (localTypeInfoCache.has(String(typeId))) {
-		localInfo = localTypeInfoCache.get(String(typeId));
-		if (_hasDogmaAttributes(localInfo)) {
-			typeInfoCache.set(typeId, localInfo);
-			await lookupCacheSet(`type-info:${typeId}`, localInfo);
-			return localInfo;
-		}
-	}
 	try {
-		const remoteInfo = await window.esi.doJsonRequest(`${ESI_BASE}/universe/types/${typeId}?language=en`);
-		const info = {
-			...(localInfo || {}),
-			...(cached || {}),
-			...(remoteInfo || {}),
-			dogma_attributes: Array.isArray(remoteInfo?.dogma_attributes) ? remoteInfo.dogma_attributes : (localInfo?.dogma_attributes || cached?.dogma_attributes || [])
-		};
-		typeInfoCache.set(typeId, info);
-		await lookupCacheSet(`type-info:${typeId}`, info);
+		const info = await window.esi.doJsonRequest(`${ESI_BASE}/universe/types/${normalizedTypeId}?language=en`);
+		typeInfoCache.set(normalizedTypeId, info);
+		await lookupCacheSet(cacheKey, info);
 		return info;
 	} catch (_) {
-		if (cached) {
-			typeInfoCache.set(typeId, cached);
-			return cached;
-		}
-		if (localInfo) {
-			typeInfoCache.set(typeId, localInfo);
-			await lookupCacheSet(`type-info:${typeId}`, localInfo);
-			return localInfo;
-		}
-		const fallback = { name: `Skill ${typeId}`, group_id: null, dogma_attributes: [] };
-		typeInfoCache.set(typeId, fallback);
-		await lookupCacheSet(`type-info:${typeId}`, fallback);
+		const fallback = { name: `Item ${normalizedTypeId}`, type_id: normalizedTypeId, group_id: null, dogma_attributes: [] };
+		typeInfoCache.set(normalizedTypeId, fallback);
 		return fallback;
 	}
 }
 
 async function getGroupInfo(groupId) {
-	if (!groupId) return null;
-	if (groupInfoCache.has(groupId)) return groupInfoCache.get(groupId);
-	const cached = await lookupCacheGet(`group-info:${groupId}`);
-	if (cached) {
-		groupInfoCache.set(groupId, cached);
-		return cached;
-	}
+	const normalizedGroupId = Number(groupId || 0);
+	if (!Number.isFinite(normalizedGroupId) || normalizedGroupId <= 0) return null;
+	if (groupInfoCache.has(normalizedGroupId)) return groupInfoCache.get(normalizedGroupId);
+
 	await ensureLocalSdeDataLoaded();
-	if (localGroupInfoCache.has(String(groupId))) {
-		const info = localGroupInfoCache.get(String(groupId));
-		groupInfoCache.set(groupId, info);
-		await lookupCacheSet(`group-info:${groupId}`, info);
+	if (localGroupInfoCache.has(String(normalizedGroupId))) {
+		const info = localGroupInfoCache.get(String(normalizedGroupId));
+		groupInfoCache.set(normalizedGroupId, info);
 		return info;
 	}
+
+	const cacheKey = `group-info:${normalizedGroupId}`;
+	const cached = await lookupCacheGet(cacheKey);
+	if (cached) {
+		groupInfoCache.set(normalizedGroupId, cached);
+		return cached;
+	}
 	try {
-		const info = await window.esi.doJsonRequest(`${ESI_BASE}/universe/groups/${groupId}?language=en`);
-		groupInfoCache.set(groupId, info);
-		await lookupCacheSet(`group-info:${groupId}`, info);
+		const info = await window.esi.doJsonRequest(`${ESI_BASE}/universe/groups/${normalizedGroupId}?language=en`);
+		groupInfoCache.set(normalizedGroupId, info);
+		await lookupCacheSet(cacheKey, info);
 		return info;
 	} catch (_) {
 		const fallback = { name: '' };
-		groupInfoCache.set(groupId, fallback);
-		await lookupCacheSet(`group-info:${groupId}`, fallback);
+		groupInfoCache.set(normalizedGroupId, fallback);
 		return fallback;
 	}
 }
@@ -5454,6 +5448,19 @@ async function ensureLocalSdeDataLoaded() {
 	})();
 
 	return localSdeDataPromise;
+}
+
+async function ensureLocalTypeShardLoaded(typeId) {
+	const shard = Math.abs(Number(typeId)) % LOCAL_TYPE_SHARD_COUNT;
+	if (!localTypeShardPromises.has(shard)) {
+		localTypeShardPromises.set(shard, (async () => {
+			const types = await fetchLocalJson(`/data/type-shards/${shard}.json`);
+			for (const [id, info] of Object.entries(types)) {
+				localTypeInfoCache.set(String(id), info);
+			}
+		})());
+	}
+	return localTypeShardPromises.get(shard);
 }
 
 async function fetchLocalJson(path) {
