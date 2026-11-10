@@ -1161,34 +1161,40 @@ async function inflateBytes(bytes) {
 }
 
 async function encodeShareSkillsPayload(records) {
-	const rawPayload = SkillUrlCodecSafe.encode(records);
-	if (!supportsShareCompressionStreams()) {
-		return rawPayload;
-	}
-
-	try {
-		const rawBytes = base64UrlToBytes(rawPayload);
-		const candidates = [rawPayload];
-
-		try {
-			const deflated = await deflateBytes(rawBytes);
-			candidates.push(`c2d_${bytesToBase64Url(deflated)}`);
-		} catch (deflateErr) {
-			console.warn('Deflate compression unavailable for share payload.', deflateErr);
+	// Snapshot order has no meaning, but queue order does. Sorting snapshots
+	// makes adjacent ID deltas small; grouping by level also compresses levels.
+	// Keep the original as a candidate so sparse/unusual shares never grow.
+	const timed = [];
+	const untimed = [];
+	for (const record of records) {
+		if (record.training_start != null || record.training_end != null) {
+			timed.push(record);
+		} else {
+			untimed.push(record);
 		}
-
-		try {
-			const gzipped = await gzipBytes(rawBytes);
-			candidates.push(`c2g_${bytesToBase64Url(gzipped)}`);
-		} catch (gzipErr) {
-			console.warn('Gzip compression unavailable for share payload.', gzipErr);
-		}
-
-		return candidates.reduce((shortest, candidate) => (candidate.length < shortest.length ? candidate : shortest), rawPayload);
-	} catch (err) {
-		console.warn('Unable to compress share payload, falling back to legacy format.', err);
-		return rawPayload;
 	}
+	const orderings = [
+		records,
+		timed.concat([...untimed].sort((a, b) => a.type_id - b.type_id)),
+		timed.concat([...untimed].sort((a, b) => a.level - b.level || a.type_id - b.type_id))
+	];
+	const candidates = [...new Set(orderings.map((rows) => SkillUrlCodecSafe.encode(rows)))];
+	if (supportsShareCompressionStreams()) {
+		for (const rawPayload of [...candidates]) {
+			const rawBytes = base64UrlToBytes(rawPayload);
+			try {
+				candidates.push(`c2d_${bytesToBase64Url(await deflateBytes(rawBytes))}`);
+			} catch (err) {
+				console.warn('Deflate compression unavailable for share payload.', err);
+			}
+			try {
+				candidates.push(`c2g_${bytesToBase64Url(await gzipBytes(rawBytes))}`);
+			} catch (err) {
+				console.warn('Gzip compression unavailable for share payload.', err);
+			}
+		}
+	}
+	return candidates.reduce((shortest, candidate) => candidate.length < shortest.length ? candidate : shortest);
 }
 
 async function decodeShareSkillsPayload(encodedSkills) {
